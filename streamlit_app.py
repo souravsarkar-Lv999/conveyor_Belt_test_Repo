@@ -1,12 +1,14 @@
 """
-Smart Mine Conveyor-Belt Health-Monitor — Interactive Website (Streamlit)
-
-A Streamlit app that turns the entire hardware design into an interactive
-visual demo for hackathon judges.
+BeltGuard - Smart Mine Conveyor-Belt Health-Monitor
+Hackathon interactive hardware demo (Streamlit, light theme).
 
 Run:
     pip install -r requirements.txt
     streamlit run streamlit_app.py
+
+Navigation: TOP TAB BAR (always visible) + LEFT SIDEBAR (sensor
+deep-dives + Reset, freely open/close). Diagrams use Mermaid (clean
+SVG); matplotlib is reserved for live data charts only.
 """
 
 from pathlib import Path
@@ -16,728 +18,1160 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib
-matplotlib.use("Agg")               # headless, no display needed
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Rectangle, Circle
 
-# Force matplotlib to use the same dark theme as Streamlit
+# Light-mode palette - single source of truth
+BG_PAGE      = "#ffffff"
+BG_CARD      = "#f6f8fa"
+BG_CARD_ALT  = "#eef1f5"
+BORDER       = "#d0d7de"
+TEXT         = "#1f2328"
+TEXT_MUTED   = "#656d76"
+
+BLUE         = "#0a5cff"
+ORANGE       = "#ff7a00"
+GREEN        = "#1f883d"
+AMBER        = "#bf8700"
+RED          = "#cf222e"
+PURPLE       = "#8250df"
+CYAN         = "#0969da"
+
+OK, WARN, ALARM = GREEN, AMBER, RED
+
 plt.rcParams.update({
-    "figure.facecolor":  "#0d1117",
-    "axes.facecolor":    "#0d1117",
-    "axes.edgecolor":    "#0d1117",
-    "savefig.facecolor": "#0d1117",
-    "savefig.edgecolor": "#0d1117",
-    "text.color":        "white",
-    "axes.labelcolor":   "white",
-    "xtick.color":       "white",
-    "ytick.color":       "white",
+    "figure.facecolor":  BG_PAGE,
+    "axes.facecolor":    BG_PAGE,
+    "axes.edgecolor":    BORDER,
+    "savefig.facecolor": BG_PAGE,
+    "savefig.edgecolor": BG_PAGE,
+    "text.color":        TEXT,
+    "axes.labelcolor":   TEXT,
+    "xtick.color":       TEXT_MUTED,
+    "ytick.color":       TEXT_MUTED,
     "font.family":       "DejaVu Sans",
+    "axes.titlecolor":   TEXT,
+    "axes.grid":         True,
+    "grid.color":        BORDER,
+    "grid.alpha":        0.5,
+    "axes.spines.top":   False,
+    "axes.spines.right": False,
 })
 
-# =====================================================================
-# PAGE CONFIG — section selector lives in a TOP TAB BAR, not a sidebar,
-# so the user can never lose navigation by collapsing the sidebar.
-# =====================================================================
 st.set_page_config(
-    page_title="BeltGuard — Mine Conveyor Safety",
+    page_title="BeltGuard - Mine Conveyor Safety",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={},
 )
 ROOT = Path(__file__).resolve().parent
-
-# =====================================================================
-# CSS
-# =====================================================================
-st.markdown("""
+st.markdown(
+    f"""
 <style>
-    footer { visibility: hidden; }
-    #MainMenu { visibility: hidden; }
-    [data-testid="stToolbar"] { visibility: hidden; }
-    [data-testid="stStatusWidget"] { visibility: hidden; }
-    .block-container { padding-top: 1.0rem; padding-bottom: 1.0rem; }
+    footer {{ visibility: hidden; }}
+    #MainMenu {{ visibility: hidden; }}
+    [data-testid="stToolbar"] {{ visibility: hidden; }}
+    [data-testid="stStatusWidget"] {{ visibility: hidden; }}
+    .block-container {{ padding-top: 1.2rem; padding-bottom: 2rem;
+                        max-width: 1180px; }}
 
-    .big-title   { font-size:2.8rem; font-weight:800; line-height:1.05;
-                   background: linear-gradient(90deg,#ff8800,#ff3300);
-                   -webkit-background-clip:text; color:transparent;
-                   margin-bottom:0.1rem; }
-    .sub-title   { font-size:1.15rem; color:#888; margin-top:-0.4rem; }
+    .stApp {{ background-color: {BG_PAGE}; color: {TEXT}; }}
+    section[data-testid="stSidebar"] {{ background-color: {BG_CARD}; }}
+    section[data-testid="stSidebar"] * {{ color: {TEXT} !important; }}
 
-    .metric-card { background:#1e1e1e; padding:1rem 1.2rem; border-radius:0.8rem;
-                   border-left:6px solid #ff8800; margin-bottom:0.4rem; }
-    .ok          { color:#00d68f; font-weight:bold; }
-    .warn        { color:#ffaa00; font-weight:bold; }
-    .crit        { color:#ff3333; font-weight:bold; }
+    h1, h2, h3, h4, h5, h6, p, li, span, div {{ color: {TEXT}; }}
+    .stCaption, small {{ color: {TEXT_MUTED} !important; }}
 
-    /* Make the top tab bar stand out */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0.4rem;
-        background: #161b22;
-        padding: 0.5rem 0.7rem;
-        border-radius: 0.6rem;
-    }
-    .stTabs [data-baseweb="tab-list"] button {
-        font-size: 1.0rem;
-        font-weight: 600;
-        padding: 0.6rem 1.1rem;
-        border-radius: 0.5rem;
-    }
+    .big-title {{ font-size:2.4rem; font-weight:800; line-height:1.05;
+                  color:{BLUE}; margin:0; }}
+    .sub-title {{ font-size:1.05rem; color:{TEXT_MUTED}; margin-top:0.1rem; }}
+
+    .card {{ background:{BG_CARD}; border:1px solid {BORDER};
+             border-radius:0.6rem; padding:1rem 1.2rem;
+             margin-bottom:0.6rem; }}
+    .card-accent {{ border-left:5px solid {BLUE}; }}
+    .card-orange {{ border-left:5px solid {ORANGE}; }}
+    .card-green  {{ border-left:5px solid {GREEN}; }}
+    .card-amber  {{ border-left:5px solid {AMBER}; }}
+    .card-red    {{ border-left:5px solid {RED}; }}
+    .card-purple {{ border-left:5px solid {PURPLE}; }}
+
+    .badge {{ display:inline-block; padding:0.15rem 0.55rem;
+              border-radius:0.4rem; font-size:0.78rem;
+              font-weight:700; letter-spacing:0.04em;
+              text-transform:uppercase; }}
+    .badge-ok    {{ background:#dafbe1; color:{GREEN};
+                    border:1px solid #aceebb; }}
+    .badge-warn  {{ background:#fff8c5; color:{AMBER};
+                    border:1px solid #d4a72c; }}
+    .badge-alarm {{ background:#ffebe9; color:{RED};
+                    border:1px solid #ff8182; }}
+    .badge-info  {{ background:#ddf4ff; color:{BLUE};
+                    border:1px solid #b6e3ff; }}
+
+    .kpi {{ background:{BG_CARD}; border:1px solid {BORDER};
+            border-radius:0.5rem; padding:0.7rem 0.9rem; }}
+    .kpi-lbl {{ font-size:0.78rem; color:{TEXT_MUTED};
+                text-transform:uppercase; letter-spacing:0.06em; }}
+    .kpi-val {{ font-size:1.6rem; font-weight:700; color:{TEXT};
+                line-height:1.1; }}
+
+    .page-title  {{ font-size:1.9rem; font-weight:800; color:{TEXT};
+                    margin:0 0 0.2rem 0; }}
+    .page-sub    {{ color:{TEXT_MUTED}; margin:0 0 1rem 0; }}
+    .section-h   {{ font-size:1.25rem; font-weight:700; color:{TEXT};
+                    margin:1.2rem 0 0.5rem 0; }}
+
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 0.3rem; background: {BG_CARD};
+        padding: 0.45rem 0.6rem; border-radius: 0.6rem;
+        border: 1px solid {BORDER};
+    }}
+    .stTabs [data-baseweb="tab-list"] button {{
+        font-size: 0.95rem; font-weight: 600;
+        padding: 0.45rem 0.95rem; border-radius: 0.45rem;
+        color: {TEXT_MUTED}; background: transparent;
+    }}
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+        background: {BLUE}; color: white;
+    }}
+    .stTabs [data-baseweb="tab-panel"] {{ padding-top: 1.2rem; }}
+
+    table {{ border-collapse: collapse; width: 100%; }}
+    th {{ background:{BG_CARD_ALT}; color:{TEXT};
+          text-align:left; padding:0.45rem 0.6rem;
+          border-bottom:1px solid {BORDER}; }}
+    td {{ padding:0.45rem 0.6rem;
+          border-bottom:1px solid {BORDER}; color:{TEXT}; }}
+
+    .mermaid svg {{ background:{BG_PAGE} !important; }}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
+# Reusable UI bits
+def badge(text, kind="info"):
+    cls = {"ok": "badge-ok", "warn": "badge-warn",
+           "alarm": "badge-alarm", "info": "badge-info"}[kind]
+    st.markdown(f'<span class="badge {cls}">{text}</span>',
+                unsafe_allow_html=True)
 
 
-# =====================================================================
-# VISUAL PRIMITIVES
-# =====================================================================
-def draw_block(ax, x, y, w, h, label, color="#ff8800", textcolor="white",
-               fontsize=10, radius=0.12):
-    """Draw a rounded, labeled block — no emojis (matplotlib fonts don't have them)."""
-    box = FancyBboxPatch(
-        (x, y), w, h,
-        boxstyle=f"round,pad=0.02,rounding_size={radius}",
-        linewidth=1.5, edgecolor=color, facecolor=color, alpha=0.92,
+def page_title(title, sub=""):
+    st.markdown(
+        f'<p class="page-title">{title}</p>'
+        f'<p class="page-sub">{sub}</p>',
+        unsafe_allow_html=True,
     )
-    ax.add_patch(box)
-    ax.text(x + w/2, y + h/2, label,
-            ha="center", va="center",
-            color=textcolor, fontsize=fontsize, fontweight="bold")
 
 
-def draw_arrow(ax, x1, y1, x2, y2, color="#888", lw=2):
-    """Draw a clean arrow without white-background artifacts."""
-    arrow = FancyArrowPatch(
-        (x1, y1), (x2, y2),
-        arrowstyle="-|>", mutation_scale=18, color=color, lw=lw,
-        shrinkA=0, shrinkB=0,
-    )
-    ax.add_patch(arrow)
+def section_h(text):
+    st.markdown(f'<p class="section-h">{text}</p>',
+                unsafe_allow_html=True)
 
 
 def show(fig):
-    """Render a matplotlib figure in Streamlit with NO white box around it."""
+    """Render a matplotlib figure inline. No white box."""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=140, bbox_inches="tight",
-                transparent=False, facecolor="#0d1117")
+                transparent=False, facecolor=BG_PAGE)
     plt.close(fig)
     buf.seek(0)
     st.image(buf, use_container_width=True)
 
 
-# =====================================================================
-# RENDER FUNCTIONS
-# =====================================================================
+# SENSOR DEFINITIONS - single source of truth for every per-sensor page.
+SENSOR_DEFS = [
+    {
+        "name": "Vibration (ADXL345)",
+        "key": "vib",
+        "unit": "g RMS",
+        "color": RED,
+        "where": "Clamped to head-pulley bearing housing (or tail pulley). "
+                 "Senses bearing race defect, pulley imbalance, belt slap.",
+        "physics": "MEMS 3-axis accelerometer. Sample at 1.6 kHz, take "
+                   "FFT, look for 1x, 2x, 3x shaft harmonics and "
+                   "broadband rise > 0.55 g RMS = WARN, > 0.85 g = ALARM.",
+        "pin": "I2C - SDA=GPIO21, SCL=GPIO22, INT=GPIO34 (input-only). "
+               "Addr 0x53.",
+        "ok":    0.55,
+        "warn":  0.85,
+        "alarm": 1.20,
+        "fails": ["Belt slip", "Bearing race spall", "Pulley imbalance",
+                  "Idler seizure"],
+        "bom":   "ADXL345 breakout - INR 180",
+    },
+    {
+        "name": "Belt temperature (DS18B20)",
+        "key": "temp",
+        "unit": "deg C",
+        "color": ORANGE,
+        "where": "Stainless probe pressed against the belt carcass, 1 m "
+                 "from head pulley (hottest zone).",
+        "physics": "1-Wire digital temp sensor, +/-0.5 deg C, 12-bit. "
+                   "Trend 60 s. >55 deg C = WARN (friction hot-spot). "
+                   ">70 deg C = ALARM (auto-ignition risk for coal dust).",
+        "pin": "1-Wire - DQ=GPIO4, 4.7 kohm pull-up to 3V3, parasite power off.",
+        "ok":    55,
+        "warn":  70,
+        "alarm": 85,
+        "fails": ["Idler bearing seizure", "Fire / smoulder",
+                  "Friction hot-spot"],
+        "bom":   "DS18B20 TO-92 + 4.7 kohm resistor - INR 95",
+    },
+    {
+        "name": "Belt tension (HX711 + load cell)",
+        "key": "tension",
+        "unit": "N",
+        "color": PURPLE,
+        "where": "Load cell on the take-up pulley carriage - measures the "
+                 "tension the gravity weight is applying.",
+        "physics": "Strain-gauge load cell in half-bridge to HX711 24-bit "
+                   "ADC to ESP32. Calibrate with known dead-weight. "
+                   "<5 000 N = belt too slack (slip risk). "
+                   ">9 500 N = over-tensioned (tear risk).",
+        "pin": "Custom - DOUT=GPIO16, SCK=GPIO17. HX711 channel A.",
+        "ok":    (5000, 9500),
+        "warn":  (3000, 11000),
+        "alarm": (1500, 13000),
+        "fails": ["Belt slip / drive burnout", "Belt tear",
+                  "Take-up ram seizure"],
+        "bom":   "1 t S-type load cell + HX711 - INR 650",
+    },
+    {
+        "name": "Drive RPM (Hall + magnet)",
+        "key": "rpm",
+        "unit": "rpm",
+        "color": CYAN,
+        "where": "Magnet epoxied to drive pulley rim; Hall sensor on the "
+                 "fixed bracket 5 mm away.",
+        "physics": "Each magnet pass gives one pulse. ESP32 pulse-counter "
+                   "computes rpm = (pulses / pulses-per-rev) * 60 / dt. "
+                   "Drop > 15 % vs setpoint = slip or belt break.",
+        "pin": "GPIO35 (input-only, no pull-up needed - open-collector "
+               "Hall with on-board 10 kohm).",
+        "ok":    (560, 640),
+        "warn":  (520, 680),
+        "alarm": (450, 720),
+        "fails": ["Drive belt slip", "Motor stall", "Belt broken"],
+        "bom":   "A3144 Hall + 6x3 mm neodymium magnet - INR 40",
+    },
+    {
+        "name": "Belt-tear IR (E18-D80NK)",
+        "key": "tear",
+        "unit": "boolean",
+        "color": RED,
+        "where": "Two sensors across the belt width, near the head pulley. "
+                 "If belt is intact, receiver sees nothing (beam blocked by "
+                 "bulk material); if belt is torn, beam passes through the "
+                 "gap -> ALARM.",
+        "physics": "Diffuse-reflective IR proximity, 3-80 cm range. "
+                   "Logic-low when target within range. ALARM = any "
+                   "sensor holds LOW for > 2 s with no drive stop.",
+        "pin": "OUT=GPIO32 (INT, input-only).",
+        "ok":    "HIGH",
+        "warn":  None,
+        "alarm": "LOW sustained",
+        "fails": ["Longitudinal belt tear", "Foreign object punch-through"],
+        "bom":   "E18-D80NK pair - INR 280",
+    },
+]
+SENSOR_DEFS += [
+    {
+        "name": "Motor current (ACS712-30A)",
+        "key": "current",
+        "unit": "A",
+        "color": AMBER,
+        "where": "Clamped on one phase of the drive-motor supply cable "
+                 "(after the contactor, before the DOL starter).",
+        "physics": "Hall-effect linear current sensor, 30 A range, "
+                   "66 mV/A. ESP32 ADC1 (GPIO33) reads the filtered "
+                   "output. RMS over 1 s. >22 A = overload / jam.",
+        "pin": "OUT -> 1 kohm + 100 nF RC low-pass -> GPIO33 (ADC1_CH5).",
+        "ok":    18,
+        "warn":  22,
+        "alarm": 28,
+        "fails": ["Idler jam", "Overload / stalling load",
+                  "Phase imbalance"],
+        "bom":   "ACS712-30A module - INR 220",
+    },
+    {
+        "name": "Coal-dust (GP2Y1010AU0F)",
+        "key": "dust",
+        "unit": "ug/m3",
+        "color": ORANGE,
+        "where": "Inside the sensor pod, looking down through a small "
+                 "mesh-protected intake. Heated inlet dries the air so "
+                 "humidity doesn't dominate the reading.",
+        "physics": "IR LED (pulsed 10 ms every 60 s) + photodiode. "
+                   "Voltage is proportional to PM density. >250 ug/m3 = "
+                   "WARN, >500 ug/m3 = explosive atmosphere alarm.",
+        "pin": "LED=GPIO25, OUT=ADC GPIO33 (shared w/ ACS712 via mux).",
+        "ok":    150,
+        "warn":  250,
+        "alarm": 500,
+        "fails": ["Dust explosion atmosphere", "Carry-back spillage",
+                  "Drum seal failure"],
+        "bom":   "Sharp GP2Y1010AU0F - INR 950",
+    },
+    {
+        "name": "CH4 / smoke (MQ-2)",
+        "key": "mq2",
+        "unit": "ppm (CH4)",
+        "color": AMBER,
+        "where": "Inside the sensor pod, gas inlet facing downward so "
+                 "rising gas reaches it. Behind a flame-arrestor mesh.",
+        "physics": "Tin-dioxide semiconductor. Heater 5 V, 150 mA. "
+                   "Rs/Ro ratio to ppm. >5 000 ppm CH4 = LEL alarm "
+                   "(LEL CH4 = 50 000 ppm).",
+        "pin": "Heater=GPIO26 via MOSFET, OUT=ADC GPIO32 (shared via mux).",
+        "ok":    1000,
+        "warn":  5000,
+        "alarm": 12000,
+        "fails": ["Methane leak", "Coal-dust fire / smoulder"],
+        "bom":   "MQ-2 module - INR 180",
+    },
+    {
+        "name": "CO / NH3 (MQ-135)",
+        "key": "mq135",
+        "unit": "ppm (CO eq.)",
+        "color": PURPLE,
+        "where": "Same chamber as MQ-2 but with its own separate "
+                 "flame-arrestor intake. Differentiates CO from CH4.",
+        "physics": "Tin-dioxide, different catalyst. Sensitive to CO, "
+                   "NH3, benzene. >30 ppm CO = toxic; >100 ppm = "
+                   "fire smoulder signature.",
+        "pin": "Heater=GPIO27 via MOSFET, OUT=ADC GPIO35.",
+        "ok":    10,
+        "warn":  30,
+        "alarm": 100,
+        "fails": ["Coal smoulder", "Diesel exhaust in tunnel"],
+        "bom":   "MQ-135 module - INR 200",
+    },
+]
+# DIAGRAMS - all as Mermaid (clean SVG, no matplotlib overlap)
+def diagram_architecture():
+    st.markdown(
+        """
+```mermaid
+flowchart LR
+    subgraph BELT ["Belt + Pulleys + Idlers"]
+        direction LR
+        B["Coal / iron ore<br/>on rubber belt"]
+    end
+    subgraph POD ["Belt Sensor Pod (IP67, on belt frame)"]
+        direction TB
+        S1["ADXL345<br/>Vibration"]
+        S2["DS18B20<br/>Temperature"]
+        S3["HX711<br/>Tension"]
+        S4["E18-IR<br/>Tear"]
+        S5["Hall<br/>RPM"]
+        S6["ACS712<br/>Current"]
+        S7["GP2Y1010<br/>Dust"]
+        S8["MQ-2 / MQ-135<br/>Gas"]
+        MCU["ESP32-WROOM-32<br/>carrier PCB"]
+        S1 --> MCU
+        S2 --> MCU
+        S3 --> MCU
+        S4 --> MCU
+        S5 --> MCU
+        S6 --> MCU
+        S7 --> MCU
+        S8 --> MCU
+    end
+    subgraph SOLAR ["Solar Pod (tunnel roof / pole)"]
+        direction TB
+        PV["20 W mono panel"]
+        MPPT["MPPT charge ctrl"]
+        BAT["12 V 20 Ah LiFePO4"]
+        BC["5 V / 3.3 V<br/>buck + LDO"]
+        PV --> MPPT --> BAT --> BC
+    end
+    subgraph CABIN ["Maintenance Cabin"]
+        direction TB
+        GW["LoRa gateway<br/>RA-02 + ESP32"]
+        DASH["Dashboard<br/>+ siren + SMS"]
+        GW --> DASH
+    end
+    BELT --> S1
+    BELT --> S2
+    BELT --> S3
+    BELT --> S4
+    BELT --> S5
+    BELT --> S6
+    POD -->|LoRa 868 MHz<br/>SF7 / BW125<br/>2-5 km LoS| CABIN
+    SOLAR -->|12 V cable| POD
+    SOLAR -->|12 V cable| CABIN
+```
+""",
+        unsafe_allow_html=False,
+    )
+
+
+def diagram_belt_layout():
+    st.markdown(
+        """
+```mermaid
+flowchart LR
+    subgraph BELT ["Belt top view (head pulley on the RIGHT)"]
+        direction LR
+        T["Tail pulley"]:::pulley
+        M["Drive motor"]:::motor
+        H["Head pulley<br/>discharge"]:::pulley
+        IDL["Idler rollers x40"]:::idler
+        T --- IDL
+        IDL --- H
+        M --- H
+        V1["ADXL345<br/>Vibration"]:::sensor --> H
+        V2["DS18B20<br/>Temp probe"]:::sensor -. touches belt .-> IDL
+        V3["HX711<br/>Load cell"]:::sensor --> T
+        V4["E18-IR<br/>Tear beam"]:::sensor --> IDL
+        V5["Hall + magnet<br/>RPM"]:::sensor --> H
+        V6["ACS712<br/>Current"]:::sensor --> M
+        V7["GP2Y1010<br/>Dust"]:::sensor -. in pod .-> T
+        V8["MQ-2 / 135<br/>Gas"]:::sensor -. in pod .-> T
+    end
+    classDef pulley fill:#eef1f5,stroke:#656d76,color:#1f2328
+    classDef motor  fill:#fff8c5,stroke:#bf8700,color:#1f2328
+    classDef idler  fill:#ddf4ff,stroke:#0969da,color:#1f2328
+    classDef sensor fill:#ffebe9,stroke:#cf222e,color:#1f2328
+```
+""",
+        unsafe_allow_html=False,
+    )
+def diagram_wiring():
+    st.markdown(
+        """
+```mermaid
+flowchart TB
+    subgraph ESP ["ESP32-WROOM-32 carrier PCB"]
+        direction TB
+        V33["3V3 rail"]
+        V5["5V rail"]
+        GND["GND"]
+        SDA["GPIO21 SDA"]
+        SCL["GPIO22 SCL"]
+        O4["GPIO4 1-Wire"]
+        O16["GPIO16 HX711 DOUT"]
+        O17["GPIO17 HX711 SCK"]
+        O25["GPIO25 Dust LED"]
+        O26["GPIO26 MQ-2 heater"]
+        O27["GPIO27 MQ-135 heater"]
+        O32["GPIO32 Tear IR / MQ-2 out"]
+        O33["GPIO33 ADC1 (ACS712 / Dust)"]
+        O34["GPIO34 ADXL345 INT"]
+        O35["GPIO35 Hall / MQ-135 out"]
+        SP["VSPI for LoRa RA-02<br/>SCK=18, MISO=19, MOSI=23,<br/>CS=5, RST=14, DIO0=27"]
+        LORA["LoRa RA-02<br/>868 MHz"]
+    end
+    SDA --> ADXL["ADXL345"]
+    SCL --> ADXL
+    O4 --> DS["DS18B20"]
+    O16 --> HX["HX711"]
+    O17 --> HX
+    O25 --> DUST["GP2Y1010"]
+    O33 --> DUST
+    O26 --> MQ2["MQ-2 heater"]
+    O27 --> MQ135["MQ-135 heater"]
+    O32 --> TEAR["E18-IR OUT"]
+    O33 --> ACS["ACS712 OUT"]
+    O34 --> ADXL
+    O35 --> HALL["Hall sensor"]
+    O35 --> MQ135
+    SP --> LORA
+```
+""",
+        unsafe_allow_html=False,
+    )
+
+
+def diagram_power():
+    st.markdown(
+        """
+```mermaid
+flowchart LR
+    PV["20 W mono<br/>solar panel<br/>Vmp 18 V / Imp 1.1 A"]:::pv
+    MPPT["MPPT charge ctrl<br/>CN3791 / DW01<br/>14.6 V abs"]:::mppt
+    BAT["12 V 20 Ah<br/>LiFePO4<br/>32700 cells"]:::bat
+    FUSE["10 A blade fuse<br/>+ TVS 30 V"]:::fuse
+    BC12["12 V distribution<br/>rail"]:::rail
+    LM["LM2596 buck<br/>12 V to 5 V / 3 A"]:::dc
+    AMS["AMS1117 LDO<br/>5 V to 3.3 V / 0.8 A"]:::dc
+    PV --> MPPT --> BAT --> FUSE --> BC12
+    BC12 --> LM --> AMS --> R3["3V3 rail<br/>ESP32 + sensors"]:::rail
+    BC12 --> R5["5V rail<br/>LoRa PA, MQ heaters"]:::rail
+    classDef pv fill:#fff8c5,stroke:#bf8700,color:#1f2328
+    classDef mppt fill:#dafbe1,stroke:#1f883d,color:#1f2328
+    classDef bat fill:#ffebe9,stroke:#cf222e,color:#1f2328
+    classDef fuse fill:#f6f8fa,stroke:#656d76,color:#1f2328
+    classDef dc fill:#ddf4ff,stroke:#0969da,color:#1f2328
+    classDef rail fill:#eef1f5,stroke:#656d76,color:#1f2328
+```
+""",
+        unsafe_allow_html=False,
+    )
+
+
+def diagram_lora():
+    st.markdown(
+        """
+```mermaid
+flowchart LR
+    POD["Belt Pod<br/>868 MHz<br/>+2 dBi whip"]:::node
+    AIR(("Air<br/>2-5 km LoS<br/>FSPL 100-110 dB")):::air
+    GW["Gateway<br/>868 MHz<br/>+6 dBi Yagi"]:::node
+    GSM["SIM800L<br/>GSM fallback"]:::node
+    DASH["Dashboard<br/>+ siren"]:::app
+    POD -->|SF7 / BW125 / 14 dBm| AIR
+    AIR --> GW
+    GW --> DASH
+    POD -.->|if LoRa fails| GSM
+    GSM -.-> DASH
+    classDef node fill:#ddf4ff,stroke:#0969da,color:#1f2328
+    classDef air  fill:#f6f8fa,stroke:#656d76,color:#1f2328
+    classDef app  fill:#dafbe1,stroke:#1f883d,color:#1f2328
+```
+""",
+        unsafe_allow_html=False,
+    )
+
+
+def diagram_enclosure():
+    st.markdown(
+        """
+```mermaid
+flowchart TB
+    LID["Lid: polycarbonate,<br/>clear, 4x M4 captive screws"]:::lid
+    SEAL["Silicone gasket<br/>re-coat yearly"]:::seal
+    BODY["Die-cast aluminium body<br/>150 x 100 x 70 mm<br/>IP67"]:::body
+    GL["Cable gland 1: 12 V from solar pod<br/>PG7, IP68"]:::gl
+    GL2["Cable gland 2: sensor loom<br/>PG9, IP68"]:::gl
+    PCB["Carrier PCB<br/>ESP32 + sensor breakouts<br/>standoffs + vibration isolators"]:::pcb
+    VENT["Goretek IP67 vent<br/>pressure equalisation"]:::vent
+    BRACKET["Stainless L-bracket<br/>clamped to belt frame"]:::brk
+    LID --- SEAL --- BODY
+    GL --> BODY
+    GL2 --> BODY
+    PCB --- BODY
+    VENT --- BODY
+    BODY --- BRACKET
+    classDef lid fill:#eef1f5,stroke:#656d76,color:#1f2328
+    classDef seal fill:#fff8c5,stroke:#bf8700,color:#1f2328
+    classDef body fill:#ddf4ff,stroke:#0969da,color:#1f2328
+    classDef gl   fill:#f6f8fa,stroke:#656d76,color:#1f2328
+    classDef pcb  fill:#dafbe1,stroke:#1f883d,color:#1f2328
+    classDef vent fill:#ffebe9,stroke:#cf222e,color:#1f2328
+    classDef brk  fill:#eef1f5,stroke:#656d76,color:#1f2328
+```
+""",
+        unsafe_allow_html=False,
+    )
+# RENDERERS - one per top-level section
+def render_overview():
+    page_title(
+        "BeltGuard",
+        "A solar-powered sensor pod that watches every metre of every "
+        "belt, 24 x 7 - replacing the human-eye inspection that lets "
+        "blasters slip through.",
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown(
+        '<div class="kpi"><div class="kpi-lbl">Belt fires</div>'
+        f'<div class="kpi-val" style="color:{RED}">detected &lt;90 s</div></div>',
+        unsafe_allow_html=True,
+    )
+    c2.markdown(
+        '<div class="kpi"><div class="kpi-lbl">Belt tears</div>'
+        f'<div class="kpi-val" style="color:{RED}">detected &lt;2 s</div></div>',
+        unsafe_allow_html=True,
+    )
+    c3.markdown(
+        '<div class="kpi"><div class="kpi-lbl">LoRa range</div>'
+        f'<div class="kpi-val" style="color:{OK}">2 to 5 km LoS</div></div>',
+        unsafe_allow_html=True,
+    )
+    c4.markdown(
+        '<div class="kpi"><div class="kpi-lbl">Solar autonomy</div>'
+        f'<div class="kpi-val" style="color:{OK}">41 days</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("")
+
+    section_h("System at a glance")
+    diagram_architecture()
+
+    section_h("How to explore this demo")
+    st.markdown(
+        """
+| Top tab | What you will see |
+|---|---|
+| **Overview** | This page |
+| **Architecture** | Full block diagram, belt-layout map, wiring pinout |
+| **Sensor Pod** | 9 individual sensor deep-dive pages (also in the left sidebar) |
+| **Live Telemetry** | 7 live charts - drag any slider to inject a fault |
+| **Simulations** | 6 interactive what-if plots |
+| **Power** | Solar pod, MPPT, battery, buck converters, energy budget |
+| **LoRa Link** | Radio link + SIM800L GSM fallback + interactive budget |
+| **Enclosure** | IP67 box, glands, vibration isolation, mounting bracket |
+| **BOM** | Full bill of materials with INR + USD totals |
+| **Install** | Step-by-step install walkthrough |
+
+> The **left sidebar** (click the chevron in the top-left) holds the
+> 9 individual sensor deep-dive sub-pages. Open or close it freely -
+> the top tab bar stays visible regardless, so you can never get lost.
+"""
+    )
+
+
 def render_architecture():
-    st.markdown("## System Architecture")
-    st.caption("Hardware loop — sensors on belt -> radio -> maintenance cabin.")
-
-    fig, ax = plt.subplots(figsize=(14, 7.5))
-    ax.set_xlim(0, 14)
-    ax.set_ylim(0, 8)
-    ax.set_aspect("equal")
-    ax.axis("off")
-
-    # Belt (drawn first so other blocks sit above it)
-    belt_y = 1.0
-    ax.add_patch(Rectangle((0.4, belt_y - 0.18), 6.0, 0.36,
-                           color="#666", zorder=1))
-    ax.text(3.4, belt_y, "Conveyor Belt", ha="center", va="center",
-            color="white", fontsize=11, fontweight="bold", zorder=2)
-
-    # Pulleys
-    for cx in [0.6, 6.2]:
-        c = Circle((cx, belt_y), 0.28, color="#999", ec="white", lw=1.4, zorder=3)
-        ax.add_patch(c)
-    ax.text(0.6, belt_y - 0.55, "drive", ha="center", color="#aaa", fontsize=8)
-    ax.text(6.2, belt_y - 0.55, "head",  ha="center", color="#aaa", fontsize=8)
-
-    # ===== ROW 1: SENSORS (top) =====
-    sensors = [
-        (0.5, 6.6, "DS18B20\nbelt temp",  "#ff5555"),
-        (2.3, 6.6, "ADXL345\nvibration",  "#55aaff"),
-        (4.1, 6.6, "HX711\ntension",      "#cc66ff"),
-        (5.9, 6.6, "E18 IR\ntear detect",  "#55ff88"),
-        (7.7, 6.6, "MQ-2 / MQ-135\nsmoke / gas", "#ffcc55"),
-    ]
-    for x, y, lbl, c in sensors:
-        draw_block(ax, x, y, 1.6, 0.9, lbl, color=c, fontsize=10)
-        # Each sensor feeds the Belt Sensor Pod (line goes straight down to pod)
-        ax.plot([x + 0.8, 4.2], [y, 4.6], color=c, lw=1.0, ls="--", alpha=0.5, zorder=0)
-
-    # ===== ROW 2: BELT SENSOR POD (center) =====
-    draw_block(ax, 3.0, 3.4, 2.4, 1.2,
-               "BELT SENSOR POD\nESP32-WROOM\n10 sensors",
-               color="#ff8800", fontsize=11)
-
-    # ===== ROW 3: SOLAR POD (right) =====
-    draw_block(ax, 10.0, 5.6, 3.2, 1.4,
-               "SOLAR POD\n20 W panel + 12 V 20 Ah\nLiFePO4 + MPPT",
-               color="#ffd700", textcolor="black", fontsize=10)
-
-    # Power conversion chain (solar -> power rails -> pod)
-    draw_block(ax, 10.0, 3.4, 3.2, 1.0,
-               "POWER RAILS\n12 V -> 5 V (LM2596)\n-> 3.3 V (AMS1117)",
-               color="#aa8800", fontsize=10)
-    draw_arrow(ax, 11.6, 5.6, 11.6, 4.4, color="#ffd700", lw=2)
-
-    # Power cable from rails to pod (curved arrow above the radio block so labels don't collide)
-    draw_arrow(ax, 10.0, 3.9, 5.4, 3.9, color="#ffaa00", lw=2)
-    ax.text(7.7, 4.15, "12 V power (cable <= 30 m)",
-            color="#aaa", fontsize=8, ha="center")
-
-    # ===== ROW 4: RADIO (pod -> gateway) =====
-    # Move radio down to row below belt-pod to free up space for the power label.
-    draw_block(ax, 6.2, 1.7, 2.0, 1.2,
-               "LoRa SX1278\n868 MHz\n+ SIM800L GSM",
-               color="#0088ff", fontsize=10)
-    # Arrow from belt pod down-right to radio
-    draw_arrow(ax, 5.4, 3.8, 6.2, 2.9, color="#ff8800", lw=2)
-
-    # ===== ROW 5: GATEWAY =====
-    draw_block(ax, 9.0, 1.6, 2.4, 1.0,
-               "GATEWAY\nRA-02 + ESP32\n4G / WiFi uplink",
-               color="#00aaff", fontsize=10)
-    draw_arrow(ax, 7.2, 3.4, 9.0, 2.6, color="#0088ff", lw=2)
-    ax.text(8.1, 3.1, "LoRa 2-5 km",
-            color="#aaccff", fontsize=8, ha="center", fontweight="bold")
-
-    # ===== ROW 6: CABIN =====
-    draw_block(ax, 11.5, 1.6, 2.2, 1.0,
-               "CABIN\ndashboard + siren\n+ SMS alerts",
-               color="#00cc66", fontsize=10)
-    draw_arrow(ax, 11.4, 2.1, 11.5, 2.1, color="#00cc66", lw=2)
-
-    show(fig)
-
-    # Detection paths
-    st.markdown("---")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("""
-        **Fire detect path**
-        1. DS18B20 spots T > 70 °C
-        2. MQ-2 / MQ-135 confirms smoke / gas
-        3. -> Siren + SMS
-        """)
-    with c2:
-        st.markdown("""
-        **Tear detect path**
-        1. E18 IR beam breaks
-        2. ADXL345 records impulse
-        3. HX711 shows tension drop
-        """)
-    with c3:
-        st.markdown("""
-        **Seizure / slip detect path**
-        1. Hall RPM drops
-        2. ACS712 current spikes
-        3. ADXL345 RMS rises
-        """)
+    page_title("Architecture",
+               "Full system block diagram, belt-layout map, wiring pinout.")
+    section_h("System block diagram")
+    diagram_architecture()
+    section_h("Where every sensor sits on the belt")
+    diagram_belt_layout()
+    section_h("Wiring pinout")
+    diagram_wiring()
 
 
 def render_sensor_pod():
-    st.markdown("## Sensor Pod")
-    tab1, tab2, tab3 = st.tabs(["3D model", "Internal layout", "Sensor map"])
+    page_title(
+        "Sensor Pod",
+        "Open the left sidebar and pick a sensor - each one has its own "
+        "page with the symbol, where it lives on the belt, physics, "
+        "pinout, live interactive graph, failure modes and BOM line.",
+    )
+    section_h("All 9 sensors at a glance")
+    cols = st.columns(3)
+    for i, s in enumerate(SENSOR_DEFS):
+        with cols[i % 3]:
+            st.markdown(
+                f'<div class="card card-orange" '
+                f'style="border-left-color:{s["color"]}">'
+                f'<b style="color:{s["color"]}">{s["name"]}</b><br>'
+                f'<span style="color:{TEXT_MUTED};font-size:0.85rem">'
+                f'{s["unit"]}</span></div>',
+                unsafe_allow_html=True,
+            )
+    section_h("Belt layout - where each sensor physically sits")
+    diagram_belt_layout()
+def render_sensor_page(s):
+    """Deep-dive page for one sensor. Everything about it, one place."""
+    page_title(s["name"],
+               f"Where it sits, how it works, and what it tells you "
+               f"(unit: {s['unit']}).")
 
-    with tab1:
-        st.markdown("### 3D reference model")
-        st.caption("Download the .glb, open in Blender or Windows 3D Viewer.")
-        glb = ROOT / "assets" / "quarry_conveyor_system_kit.glb"
-        if glb.exists():
-            with open(glb, "rb") as f:
-                st.download_button(
-                    "Download .glb 3D model (6.9 MB)",
-                    data=f.read(),
-                    file_name="quarry_conveyor_belt.glb",
-                    mime="model/gltf-binary",
-                )
-            st.info("Tip: also browse assets/ for reference photos.")
-        st.markdown("**Reference photos:**")
-        col1, col2, col3 = st.columns(3)
-        for col, name in zip(
-            [col1, col2, col3],
-            ["Basic-components-of-a-conveyor-belt-800x400.webp",
-             "Parts-of-the-conveyor-belt-a-Belt-The-belt-is-consisting-of-2-or-more-layers-of.webp",
-             "oreflow-2-min.jpg.webp"],
-        ):
-            p = ROOT / "assets" / name
-            if p.exists():
-                col.image(str(p), use_column_width=True,
-                          caption=name.split(".")[0][:40])
+    badge_row = st.columns([1, 2, 2, 2])
+    with badge_row[0]:
+        st.markdown(
+            f'<div class="card" style="text-align:center;'
+            f'font-family:ui-monospace,monospace;font-size:0.8rem;'
+            f'color:{s["color"]}">'
+            f'+-------+\n| {s["key"].upper():<5} |\n+---.---+\n    |\n  {s["unit"]}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with badge_row[1]:
+        st.markdown(
+            f'<div class="card card-green"><b>OK</b> &nbsp; {s["ok"]}<br>'
+            f'<span style="color:{TEXT_MUTED};font-size:0.85rem">'
+            f'Normal operation</span></div>',
+            unsafe_allow_html=True,
+        )
+    with badge_row[2]:
+        st.markdown(
+            f'<div class="card card-amber"><b>WARN</b> &nbsp; {s["warn"]}<br>'
+            f'<span style="color:{TEXT_MUTED};font-size:0.85rem">'
+            f'Flag to maintenance</span></div>',
+            unsafe_allow_html=True,
+        )
+    with badge_row[3]:
+        st.markdown(
+            f'<div class="card card-red"><b>ALARM</b> &nbsp; {s["alarm"]}<br>'
+            f'<span style="color:{TEXT_MUTED};font-size:0.85rem">'
+            f'Stop belt + SMS</span></div>',
+            unsafe_allow_html=True,
+        )
 
-    with tab2:
-        st.markdown("### Internal layout (top-down)")
-        st.caption("Die-cast aluminium IP67 enclosure, 240 x 160 x 90 mm.")
-        fig, ax = plt.subplots(figsize=(11, 6.5))
-        ax.set_xlim(0, 11); ax.set_ylim(0, 7); ax.axis("off")
+    section_h("Where it lives on the belt")
+    st.markdown(s["where"])
 
-        # Outer box
-        ax.add_patch(Rectangle((0.2, 0.2), 10.6, 6.6, fill=False,
-                               edgecolor="#ff8800", lw=3))
-        ax.text(5.5, 6.45, "Die-cast aluminium, IP67, 240 x 160 x 90 mm",
-                ha="center", color="#ff8800", fontsize=11, fontweight="bold")
+    section_h("How it works")
+    st.markdown(s["physics"])
 
-        # Components
-        draw_block(ax, 0.5, 3.0, 2.4, 1.4,
-                   "ESP32-WROOM\nmain controller", color="#0077ff", fontsize=10)
-        draw_block(ax, 0.5, 1.4, 2.4, 1.2,
-                   "SX1278 LoRa\n868 MHz",          color="#0088ff", fontsize=10)
-        draw_block(ax, 0.5, 0.3, 2.4, 0.9,
-                   "SIM800L GSM\nSMS fallback",     color="#ff3333", fontsize=10)
-        draw_block(ax, 3.5, 3.5, 3.0, 1.5,
-                   "Carrier PCB\n(sensors + power)", color="#aa00aa", fontsize=10)
-        draw_block(ax, 3.5, 1.4, 3.0, 1.6,
-                   "DS18B20  NTC\nADXL345  HX711\nACS712  Hall", color="#ff5555", fontsize=9)
-        draw_block(ax, 7.5, 4.5, 3.0, 1.0,
-                   "LM2596  12 V -> 5 V",            color="#cc8800", fontsize=10)
-        draw_block(ax, 7.5, 3.0, 3.0, 1.0,
-                   "AMS1117  5 V -> 3.3 V",         color="#cc8800", fontsize=10)
-        draw_block(ax, 7.5, 1.4, 3.0, 1.2,
-                   "OLED 0.96\"\n+ Buzzer",          color="#666", fontsize=10)
+    section_h("Pinout / wiring")
+    st.code(s["pin"], language="text")
 
-        # Antenna feedthroughs
-        ax.add_patch(Circle((1.0, 6.4), 0.18, color="#fff", ec="white"))
-        ax.text(1.0, 6.75, "LoRa ant", color="white", ha="center", fontsize=8)
-        ax.add_patch(Circle((2.3, 6.4), 0.15, color="#fff", ec="white"))
-        ax.text(2.3, 6.75, "GSM ant", color="white", ha="center", fontsize=8)
+    section_h("Interactive live reading - drag the slider")
+    _render_sensor_slider(s)
 
-        # Cable glands on bottom
-        for x, lbl in [(4.5, "tear IR"), (6.0, "RPM"),
-                       (7.5, "strain"), (9.0, "solar 12V")]:
-            ax.add_patch(Circle((x, 0.5), 0.18, color="#aaa"))
-            ax.text(x, 1.0, lbl, color="#aaa", ha="center", fontsize=8)
+    section_h("Failure modes it catches")
+    for f in s["fails"]:
+        st.markdown(f"- {f}")
 
-        show(fig)
-
-    with tab3:
-        st.markdown("### Where each sensor sits on the belt")
-        fig, ax = plt.subplots(figsize=(14, 4.5))
-        ax.set_xlim(0, 14); ax.set_ylim(0, 5); ax.axis("off")
-
-        # Belt
-        ax.add_patch(Rectangle((0.5, 2.0), 13.0, 0.6, color="#666"))
-        # Idlers
-        for x in [1.0, 3.5, 6.0, 8.5, 11.0, 13.0]:
-            ax.add_patch(Circle((x, 2.0), 0.22, color="#999", ec="white"))
-
-        # Sensor pod
-        draw_block(ax, 5.5, 2.7, 3.0, 0.9, "BELT SENSOR POD",
-                   color="#ff8800", fontsize=11)
-
-        # Annotations
-        ann = [
-            (1.0,  0.6, "ADXL345\non idler",          "#55aaff"),
-            (6.0,  4.2, "DS18B20\nunder pod",          "#ff5555"),
-            (9.0,  4.2, "HX711\non take-up\nframe",     "#cc66ff"),
-            (13.0, 0.6, "E18 IR\nat head pulley",      "#55ff88"),
-            (13.0, 4.2, "Hall RPM\nat drive pulley",   "#ffcc55"),
-        ]
-        for x, y, lbl, c in ann:
-            ax.annotate(lbl, xy=(x, 2.3), xytext=(x, y),
-                        ha="center", color=c, fontsize=9, fontweight="bold",
-                        arrowprops=dict(arrowstyle="->", color=c, lw=1.4))
-
-        show(fig)
+    section_h("BOM line")
+    st.markdown(f"`{s['bom']}`")
 
 
+def _render_sensor_slider(s):
+    """A live graph + slider for one sensor, with OK / WARN / ALARM bands."""
+    if s["key"] not in st.session_state:
+        st.session_state[s["key"]] = float(s["warn"])
+
+    try:
+        hi = float(max(s["alarm"], s["warn"])) * 1.6
+    except TypeError:
+        hi = float(max(s["alarm"][1], s["warn"][1])) * 1.6
+
+    val = st.slider(
+        f"Current {s['unit']} reading",
+        min_value=0.0,
+        max_value=hi,
+        value=st.session_state[s["key"]],
+        step=0.5,
+        key=f"slider_{s['key']}",
+    )
+    st.session_state[s["key"]] = val
+
+    if isinstance(s["warn"], (int, float)):
+        if val >= s["alarm"]:
+            status, kind = "ALARM", "alarm"
+        elif val >= s["warn"]:
+            status, kind = "WARN", "warn"
+        else:
+            status, kind = "OK", "ok"
+    else:
+        status, kind = ("ALARM" if val < 0.5 else "OK"), (
+            "alarm" if val < 0.5 else "ok"
+        )
+
+    cols = st.columns([3, 1])
+    with cols[1]:
+        badge(f"{status} - {val:.2f} {s['unit']}", kind)
+
+    n = 120
+    t = np.arange(n)
+    base = np.linspace(val * 0.7, val, n) + 0.05 * val * np.sin(t / 5)
+    fig, ax = plt.subplots(figsize=(11, 2.6))
+    ax.plot(t, base, color=s["color"], lw=1.8)
+    if isinstance(s["warn"], (int, float)):
+        ax.axhline(s["warn"], color=AMBER, ls="--", lw=1.2,
+                   label=f"WARN {s['warn']}")
+        ax.axhline(s["alarm"], color=RED, ls="--", lw=1.2,
+                   label=f"ALARM {s['alarm']}")
+        ax.legend(loc="upper right", fontsize=8, frameon=False)
+    ax.set_xlabel("sample")
+    ax.set_ylabel(s['unit'])
+    ax.set_title(f"{s['name']} - live (last {n} samples)")
+    show(fig)
 def render_live_telemetry():
-    st.markdown("## Live Telemetry Dashboard")
-    st.caption("Simulated feed from one pod. (Replace with real LoRa receiver in production.)")
-
+    page_title("Live Telemetry",
+               "Simulated feed. Move any slider - every graph reacts.")
     if "telemetry_data" not in st.session_state:
         np.random.seed(int(time.time()) % 1000)
         st.session_state.telemetry_data = pd.DataFrame({
-            "time":   pd.date_range("2026-09-04 00:00", periods=200, freq="1min"),
-            "temp_C": 35 + 2*np.random.randn(200).cumsum()*0.05,
-            "vib_g":  np.abs(0.4 + 0.1*np.random.randn(200).cumsum()),
-            "rpm":    600 + 5*np.sin(np.linspace(0, 20, 200)) + 2*np.random.randn(200),
-            "rssi":   -85 - 3*np.random.randn(200),
-            "soc_pct":np.clip(82 - 0.05*np.arange(200) + 0.5*np.random.randn(200), 0, 100),
+            "time":    pd.date_range("2026-09-04 00:00", periods=200,
+                                     freq="1min"),
+            "temp_C":  35 + 2 * np.random.randn(200).cumsum() * 0.05,
+            "vib_g":   np.abs(0.4 + 0.1 * np.random.randn(200).cumsum()),
+            "tension_N": 6000 + 200 * np.sin(np.linspace(0, 20, 200))
+                          + 100 * np.random.randn(200),
+            "rpm":     600 + 5 * np.sin(np.linspace(0, 20, 200))
+                       + 2 * np.random.randn(200),
+            "current_A": 12 + 1 * np.sin(np.linspace(0, 20, 200))
+                         + 0.3 * np.random.randn(200),
+            "rssi":    -85 - 3 * np.random.randn(200),
+            "soc_pct": np.clip(82 - 0.05 * np.arange(200)
+                               + 0.5 * np.random.randn(200), 0, 100),
         })
-
     df = st.session_state.telemetry_data
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Belt temp",  f"{df['temp_C'].iloc[-1]:.1f} °C",
-              delta=f"{df['temp_C'].iloc[-1]-df['temp_C'].iloc[-2]:+.1f}")
-    c2.metric("Vibration",  f"{df['vib_g'].iloc[-1]:.2f} g",
-              delta=f"{df['vib_g'].iloc[-1]-df['vib_g'].iloc[-2]:+.2f}")
-    c3.metric("Drive RPM",  f"{df['rpm'].iloc[-1]:.0f}",
-              delta=f"{df['rpm'].iloc[-1]-df['rpm'].iloc[-2]:+.0f}")
-    c4.metric("LoRa RSSI",  f"{df['rssi'].iloc[-1]:.0f} dBm")
-    c5.metric("Battery",    f"{df['soc_pct'].iloc[-1]:.0f} %")
-    status = "OK"
-    if df['temp_C'].iloc[-1] > 70 or df['vib_g'].iloc[-1] > 1.0:
-        status = "ALARM"
-    elif df['temp_C'].iloc[-1] > 55 or df['vib_g'].iloc[-1] > 0.7:
-        status = "WARN"
-    c6.metric("Status", status)
+    cols = st.columns(7)
+    specs = [
+        ("Belt temp",   "temp_C",    "deg C", 70,  RED),
+        ("Vibration",   "vib_g",     "g",     0.85, RED),
+        ("Tension",     "tension_N", "N",     9500, RED),
+        ("Drive RPM",   "rpm",       "rpm",   540,  AMBER),
+        ("Current",     "current_A", "A",     22,   AMBER),
+        ("RSSI",        "rssi",      "dBm",   -110, AMBER),
+        ("Battery",     "soc_pct",   "%",     20,   RED),
+    ]
+    for col, (lbl, k, unit, thr, _alarm_color) in zip(cols, specs):
+        v = df[k].iloc[-1]
+        prev = df[k].iloc[-2]
+        is_low = (k == "soc_pct")
+        bad = (v < thr) if is_low else (v > thr)
+        near_warn = (thr * 2) if is_low else (thr * 0.8)
+        if bad:
+            color = RED
+        elif (v < near_warn) if is_low else (v > near_warn):
+            color = AMBER
+        else:
+            color = OK
+        with col:
+            st.markdown(
+                f'<div class="kpi"><div class="kpi-lbl">{lbl}</div>'
+                f'<div class="kpi-val" style="color:{color}">'
+                f'{v:.1f} {unit}</div>'
+                f'<div style="color:{TEXT_MUTED};font-size:0.78rem">'
+                f'Delta {v - prev:+.2f}</div></div>',
+                unsafe_allow_html=True,
+            )
 
-    st.markdown("---")
+    st.markdown("")
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 6))
-    axes[0, 0].plot(df["time"], df["temp_C"], color="#ff5555")
-    axes[0, 0].axhline(70, color="red", ls="--", alpha=0.5)
-    axes[0, 0].set_title("Belt temperature (C)")
-    axes[0, 0].grid(alpha=0.2)
-
-    axes[0, 1].plot(df["time"], df["vib_g"], color="#55aaff")
-    axes[0, 1].axhline(0.8, color="red", ls="--", alpha=0.5)
-    axes[0, 1].set_title("Vibration RMS (g)")
-    axes[0, 1].grid(alpha=0.2)
-
-    axes[1, 0].plot(df["time"], df["rpm"], color="#55ff88")
-    axes[1, 0].set_title("Drive RPM")
-    axes[1, 0].grid(alpha=0.2)
-
-    axes[1, 1].plot(df["time"], df["soc_pct"], color="#ffaa00")
-    axes[1, 1].set_title("Battery SoC (%)")
-    axes[1, 1].set_ylim(0, 100)
-    axes[1, 1].grid(alpha=0.2)
-
-    for ax in axes.flat:
-        ax.tick_params(axis="x", rotation=30, labelsize=8)
+    fig, axes = plt.subplots(4, 2, figsize=(12, 10))
+    series = [
+        ("temp_C",     "Belt temperature",  "deg C",  [(70, RED), (55, AMBER)]),
+        ("vib_g",      "Vibration RMS",     "g",      [(0.85, RED), (0.55, AMBER)]),
+        ("tension_N",  "Belt tension",      "N",      [(9500, RED), (7000, AMBER)]),
+        ("rpm",        "Drive RPM",         "rpm",    [(540, AMBER)]),
+        ("current_A",  "Motor current",     "A",      [(22, RED), (16, AMBER)]),
+        ("soc_pct",    "Battery SoC",       "%",      [(20, RED), (40, AMBER)]),
+        ("rssi",       "LoRa RSSI",         "dBm",    [(-110, RED), (-100, AMBER)]),
+    ]
+    axes_flat = axes.flatten()
+    palette = [RED, BLUE, PURPLE, AMBER, CYAN, GREEN, CYAN]
+    for i, ((col, title, unit, thrs), c) in enumerate(zip(series, palette)):
+        ax = axes_flat[i]
+        ax.plot(df["time"], df[col], color=c, lw=1.4)
+        for thr, cc in thrs:
+            ax.axhline(thr, color=cc, ls="--", lw=1.0, alpha=0.7)
+        ax.set_title(f"{title} ({unit})", fontsize=10)
+        ax.tick_params(axis="x", rotation=30, labelsize=7)
+        ax.tick_params(axis="y", labelsize=8)
+    for j in range(len(series), len(axes_flat)):
+        axes_flat[j].axis("off")
     fig.tight_layout()
     show(fig)
 
-    if st.button("Inject simulated belt fire (demo)"):
-        df.loc[df.index[-1], "temp_C"] = 85.0
-        df.loc[df.index[-1], "vib_g"] = 1.4
-        st.session_state.telemetry_data = df
-        st.error("ALARM: Belt temp > 70 C and vibration > 1 g -> fire suspected. SMS dispatched.")
-
-
+    section_h("Inject a fault")
+    fcols = st.columns(4)
+    if fcols[0].button("Belt fire (temp + vib)"):
+        df["temp_C"].iloc[-10:] += 50
+        df["vib_g"].iloc[-10:] += 0.6
+        st.rerun()
+    if fcols[1].button("Belt tear (RPM drop)"):
+        df["rpm"].iloc[-5:] -= 200
+        st.rerun()
+    if fcols[2].button("Idler jam (current up)"):
+        df["current_A"].iloc[-8:] += 14
+        st.rerun()
+    if fcols[3].button("Battery low (SoC down)"):
+        df["soc_pct"].iloc[-3:] -= 30
+        st.rerun()
 def render_simulations():
-    st.markdown("## Simulations — interactive plots")
-    sim = st.selectbox("Pick a simulation", [
-        "Power budget (battery over 7 days)",
-        "Solar harvest (panel over 1 week)",
-        "LoRa link budget (RSSI vs distance)",
-        "Vibration FFT (3x RPM fault peak)",
-        "Belt thermal / fire",
-        "Strain-gauge calibration",
+    page_title("Simulations",
+               "Six interactive what-if plots - drag any slider to see how "
+               "the system would behave.")
+    tabs = st.tabs([
+        "Belt thermal", "Vibration FFT", "Strain calibration",
+        "LoRa budget", "Solar harvest", "Power budget",
     ])
-
-    if "Power budget" in sim:
-        st.markdown("### 12 V 20 Ah LiFePO4 — autonomy")
-        c1, c2 = st.columns(2)
-        load_w = c1.slider("Continuous load (W)", 0.1, 3.0, 0.3, 0.05)
-        days   = c2.slider("Days to simulate", 1, 30, 7)
-        e = 205
-        t = np.arange(0, days*24 + 1)
-        soc = np.array([max(0, (e := e - load_w)) for _ in t]) / 205
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(t/24, soc*100, lw=2, color="#ffaa00")
-        ax.axhline(20, color="red", ls="--", label="BMS cutoff 20%")
-        ax.set_xlabel("Days"); ax.set_ylabel("State of charge (%)")
-        ax.grid(alpha=0.2); ax.legend()
-        show(fig)
-
-    elif "Solar harvest" in sim:
-        st.markdown("### Solar panel — harvest vs weather")
-        c1, c2 = st.columns(2)
-        panel_w   = c1.slider("Panel size (W)", 5, 50, 20)
-        weather   = c2.slider("Sun-hours equivalent (h/day)", 1.0, 6.0, 4.5)
-        load_wh_d = st.slider("Daily load (Wh/day)", 5, 50, 10)
-        harvest = panel_w * weather * 0.75
-        net = harvest - load_wh_d
-        fig, ax = plt.subplots(figsize=(10, 4))
-        bars = ["Daily harvest", "Daily load", "Net"]
-        ax.bar(bars, [harvest, load_wh_d, net],
-               color=["#55ff88", "#ffaa00", "#55aaff"])
-        ax.axhline(0, color="white", lw=0.5)
-        for i, v in enumerate([harvest, load_wh_d, net]):
-            ax.text(i, v + (1 if v>=0 else -3), f"{v:.1f} Wh",
-                    ha="center", fontweight="bold")
-        ax.set_ylabel("Wh/day")
-        show(fig)
-        st.info(f"Net {net:+.1f} Wh/day — battery {'gains' if net>0 else 'loses'} "
-                f"{abs(net)/12/20*24*100/205:.1f}% SoC per day.")
-
-    elif "LoRa link budget" in sim:
-        st.markdown("### LoRa 868 MHz — RSSI vs distance")
-        c1, c2 = st.columns(2)
-        tx_dbm = c1.slider("TX power (dBm)", 2, 20, 14)
-        rock_l = c2.slider("Rock-wall penalty (dB)", 0, 30, 12)
-        d = np.linspace(0.1, 10, 500)
-        fspl = 32.45 + 20*np.log10(d) + 20*np.log10(868)
-        rssi = tx_dbm + 3 + 3 - 1.5 - fspl - rock_l
-        sens = -137
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(d, rssi, lw=2, color="#55aaff")
-        ax.axhline(sens, color="white", ls="--", label=f"Sens {sens} dBm")
-        cross = d[np.where(rssi < sens)[0][0]] if (rssi < sens).any() else 10
-        ax.axvline(cross, color="red", ls=":",
-                   label=f"Max range ~ {cross:.1f} km")
-        ax.fill_between(d, rssi, -160, where=(rssi > sens),
-                        color="#55ff88", alpha=0.15)
-        ax.fill_between(d, rssi, -160, where=(rssi < sens),
-                        color="#ff5555", alpha=0.15)
-        ax.set_xlabel("Distance (km)"); ax.set_ylabel("RSSI (dBm)")
-        ax.set_ylim(-160, -60); ax.grid(alpha=0.2); ax.legend()
-        show(fig)
-
-    elif "Vibration FFT" in sim:
-        st.markdown("### ADXL345 vibration — 3x RPM fault peak")
-        rpm = st.slider("Drive RPM", 100, 1200, 600)
-        fs, dur = 200, 3
-        t = np.linspace(0, dur, fs*dur)
-        rpm1 = rpm/60; rpm3 = 3*rpm/60
-        healthy = 0.3*np.sin(2*np.pi*rpm1*t) + 0.1*np.random.randn(len(t))
-        failing = healthy + 1.0*np.sin(2*np.pi*rpm3*t) + 0.2*np.random.randn(len(t))
-        f1 = np.fft.rfftfreq(len(healthy), 1/fs)
-        m1 = np.abs(np.fft.rfft(healthy))*2/len(healthy)
-        m2 = np.abs(np.fft.rfft(failing))*2/len(failing)
-        fig, axes = plt.subplots(2, 1, figsize=(10, 6))
-        axes[0].plot(t, healthy, label="healthy")
-        axes[0].plot(t, failing, label="failing")
-        axes[0].set_title("Time domain")
-        axes[0].grid(alpha=0.2); axes[0].legend()
-        axes[1].plot(f1, m1, label="healthy")
-        axes[1].plot(f1, m2, label="failing")
-        axes[1].axvline(rpm3, color="red", ls="--",
-                        label=f"3x RPM = {rpm3:.1f} Hz")
-        axes[1].set_xlim(0, 100)
-        axes[1].set_title("FFT — fault peak at 3x RPM")
-        axes[1].grid(alpha=0.2); axes[1].legend()
-        fig.tight_layout()
-        show(fig)
-
-    elif "Belt thermal" in sim:
-        st.markdown("### Belt fire — DS18B20 response")
-        fire_w = st.slider("Fire heat flux (kW/m2)", 10, 100, 60)
-        t = np.linspace(0, 600, 601)
-        T_amb = 35
-        flux = np.where(t < 120, 0,
-                np.minimum(fire_w*1000, fire_w*1000*np.minimum(1,(t-120)/120)))
-        dT = (flux/18000) * 1
-        T = T_amb + np.cumsum(dT)/60
-        T = np.minimum(T, 950)
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(t/60, T, color="#ff5555", lw=2)
-        ax.axhline(70, color="white", ls="--", label="Alarm 70 C")
-        alarm = t[np.argmax(T > 70)] if (T > 70).any() else None
-        if alarm is not None:
-            ax.annotate(f"ALARM @ {alarm/60:.1f} min",
-                        xy=(alarm/60, 70), xytext=(alarm/60+0.5, 200),
-                        color="white", fontweight="bold",
-                        arrowprops=dict(arrowstyle="->", color="red"))
-        ax.set_xlabel("Time (min)"); ax.set_ylabel("Belt surface T (C)")
-        ax.grid(alpha=0.2); ax.legend()
-        show(fig)
-
-    elif "Strain-gauge" in sim:
-        st.markdown("### HX711 + BF350 strain gauge — calibration")
-        tension_n = st.slider("Belt tension (N)", 0, 10000, 5000)
-        code = tension_n * 2097.152
-        nf = 21.0
-        fig, ax = plt.subplots(figsize=(10, 4))
-        tens  = np.linspace(0, 10000, 500)
-        codes = tens * 2097.152
-        ax.plot(tens, codes, lw=2, color="#cc66ff")
-        ax.scatter([tension_n], [code], color="red", s=100, zorder=5,
-                   label=f"You: {code:,.0f} counts")
-        ax.axhline( nf, color="red", ls="--", alpha=0.5, label=f"Noise +/-{nf:.0f}")
-        ax.axhline(-nf, color="red", ls="--", alpha=0.5)
-        ax.set_xlabel("Belt tension (N)"); ax.set_ylabel("HX711 ADC code")
-        ax.grid(alpha=0.2); ax.legend()
-        show(fig)
+    with tabs[0]:
+        _sim_belt_thermal()
+    with tabs[1]:
+        _sim_vibration_fft()
+    with tabs[2]:
+        _sim_strain_cal()
+    with tabs[3]:
+        _sim_lora_budget()
+    with tabs[4]:
+        _sim_solar_harvest()
+    with tabs[5]:
+        _sim_power_budget()
 
 
-def render_power():
-    st.markdown("## Power System")
-    st.caption("Solar pod = panel + MPPT + LiFePO4 + buck converters.")
-    st.markdown("""
-    | Item                              | Spec                                       |
-    |-----------------------------------|--------------------------------------------|
-    | Panel                             | 20 W mono (Voc 22 V, Isc 1.2 A)            |
-    | Controller                       | EPever Tracer 1210AN, 10 A MPPT            |
-    | Battery                          | 12 V 20 Ah LiFePO4 (256 Wh, 80% DoD = 205 Wh) |
-    | Buck 5 V                         | LM2596-ADJ (3 A)                           |
-    | LDO 3.3 V                        | AMS1117-3.3                               |
-    """)
-    st.markdown("---")
-    st.markdown("### Energy budget")
-    data = {
-        "Mode":          ["Sleep", "Active", "Alarm", "Continuous TX"],
-        "Current (mA)":  [3,       80,       200,     500],
-        "Hours/day":     [20,      3,        0.5,     0.5],
-    }
-    df = pd.DataFrame(data)
-    df["mAh/day"] = df["Current (mA)"] * df["Hours/day"]
-    df["Wh/day"]  = df["mAh/day"] * 3.3 / 1000 * 1.3
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    total_wh = df["Wh/day"].sum()
-    st.metric("Total energy",  f"{total_wh:.1f} Wh/day",
-              delta=f"{20*4*0.75 - total_wh:+.1f} Wh/day solar surplus")
-
-
-def render_lora():
-    st.markdown("## LoRa Radio Link — hardware")
-    st.caption("868 MHz ISM band, no SIM required, works through rock.")
-    st.markdown("""
-    - **Modem**: Semtech SX1278 (RA-02 module) on SPI
-    - **Band**: 868 MHz (India / EU sub-GHz ISM, no licence needed)
-    - **Spreading factor**: SF12, BW 125 kHz, CR 4/5 -> sensitivity **-137 dBm**
-    - **TX power**: +14 dBm (about 25 mW)
-    - **Antenna**: 3 dBi omni fiberglass, vertical, 2 m above ground
-    - **Range**: 2-5 km line-of-sight, ~500 m through 1 rock wall
-    - **Fallback**: SIM800L GSM module (SMS only, 1 message / hour)
-    - **Encryption**: AES-128 (LoRaWAN AppKey + NwkSKey)
-    """)
-    # Hardware block diagram of the radio chain
-    fig, ax = plt.subplots(figsize=(14, 4.5))
-    ax.set_xlim(0, 14); ax.set_ylim(0, 5); ax.axis("off")
-    draw_block(ax, 0.2, 1.6, 1.8, 1.2, "ESP32\nSPI bus", color="#0077ff", fontsize=10)
-    draw_arrow(ax, 2.0, 2.2, 2.6, 2.2)
-    draw_block(ax, 2.6, 1.6, 1.8, 1.2, "SX1278\nRA-02", color="#0088ff", fontsize=10)
-    draw_arrow(ax, 4.4, 2.2, 5.0, 2.2)
-    draw_block(ax, 5.0, 1.6, 2.0, 1.2, "SMA\nfeedthrough", color="#444", fontsize=10)
-    draw_arrow(ax, 7.0, 2.2, 7.6, 2.2)
-    draw_block(ax, 7.6, 1.6, 2.4, 1.2, "3 dBi\nfiber-glass ant",
-               color="#ff8800", fontsize=10)
-    ax.annotate("868 MHz\n2-5 km LoS", xy=(11.0, 2.2), xytext=(11.0, 4.2),
-                color="white", ha="center", fontsize=10, fontweight="bold",
-                arrowprops=dict(arrowstyle="->", color="white"))
-    draw_block(ax, 10.4, 0.4, 3.0, 1.0,
-               "GATEWAY\nRA-02 + ESP32 + 4G",
-               color="#00cc66", fontsize=10)
+def _sim_belt_thermal():
+    section_h("Belt thermal - how fast does a hot-spot reach ignition?")
+    ambient = st.slider("Ambient (deg C)", 20, 45, 32)
+    hotspot = st.slider("Hot-spot start (deg C above ambient)", 0, 60, 10)
+    mins = np.linspace(0, 120, 600)
+    k = 0.04
+    T = ambient + hotspot * np.exp(k * mins)
+    fig, ax = plt.subplots(figsize=(11, 3.5))
+    ax.plot(mins, T, color=ORANGE, lw=2)
+    ax.axhline(70, color=RED, ls="--", lw=1.0, label="Alarm 70 deg C")
+    ax.axhline(55, color=AMBER, ls="--", lw=1.0, label="Warn 55 deg C")
+    alarm_t = mins[np.argmax(T > 70)] if (T > 70).any() else None
+    if alarm_t is not None:
+        ax.annotate(f"ALARM @ {alarm_t:.0f} min",
+                    xy=(alarm_t, 70), xytext=(alarm_t + 8, 80),
+                    arrowprops=dict(arrowstyle="-|>", color=RED),
+                    color=RED, fontsize=10)
+    ax.set_xlabel("minutes"); ax.set_ylabel("belt temp (deg C)")
+    ax.legend(frameon=False)
     show(fig)
 
 
-def render_bom():
-    st.markdown("## Bill of Materials")
-    bom = [
-        ("ESP32-WROOM-32",                  "Main controller",            1,  350),
-        ("SX1278 (RA-02) LoRa module",      "868 MHz radio",              1,  450),
-        ("SIM800L GSM module",              "SMS fallback",               1,  650),
-        ("ADXL345 IMU",                     "Vibration",                  1,  220),
-        ("HX711 + BF350-3AA strain gauge",  "Belt tension",               1,  380),
-        ("DS18B20 temp probe",              "Belt surface temp",          2,  110),
-        ("NTC 10 kOhm thermistor",          "Ambient + secondary temp",   2,   35),
-        ("Hall-effect pickup (A3144)",      "RPM",                        1,   80),
-        ("E18-IR80NK IR proximity",         "Tear detect",                2,  180),
-        ("ACS712-20A current sensor",       "Drive motor current",        1,  220),
-        ("GP2Y1010 dust sensor",            "PM2.5",                      1,  380),
-        ("MQ-2 gas sensor",                 "Smoke / LPG",                1,  180),
-        ("MQ-135 gas sensor",               "CO / CH4 / NH3",             1,  220),
-        ('OLED 0.96" I2C',                  "Local display",              1,  180),
-        ("Buzzer 5 V active",               "Local alarm",                1,   40),
-        ("LM2596-ADJ buck",                 "12 -> 5 V",                  1,   90),
-        ("AMS1117-3.3 LDO",                 "5 -> 3.3 V",                 1,   20),
-        ("20 W solar panel",                "Power",                      1, 1400),
-        ("EPever Tracer 1210AN MPPT",       "Charge controller",          1, 1800),
-        ("12 V 20 Ah LiFePO4 battery",      "Storage",                    1, 6800),
-        ("Die-cast aluminium box 240x160",  "Enclosure IP67",             1, 1500),
-        ("M10 U-bolts, cable glands",       "Mounting hardware",          1,  600),
+def _sim_vibration_fft():
+    section_h("Vibration FFT - is that a bearing defect or just background?")
+    g_amp = st.slider("Bearing defect amplitude (g)", 0.0, 2.0, 0.6, 0.05)
+    f0 = st.slider("Shaft rotation (Hz)", 5, 25, 12)
+    f = np.linspace(0, 100, 2000)
+    sig = (0.05 + 0.15 / (1 + ((f - f0) / 2) ** 2)
+           + g_amp * np.exp(-((f - f0 * 2.3) / 0.5) ** 2))
+    fig, ax = plt.subplots(figsize=(11, 3.5))
+    ax.semilogy(f, sig + 1e-3, color=BLUE, lw=1.4)
+    ax.axvline(f0, color=GREEN, ls=":", label="1x shaft")
+    ax.axvline(f0 * 2.3, color=RED, ls=":", label="2.3x bearing defect")
+    ax.set_xlabel("Hz"); ax.set_ylabel("amplitude (g, log)")
+    ax.legend(frameon=False)
+    show(fig)
+
+
+def _sim_strain_cal():
+    section_h("Strain / load-cell calibration")
+    mass = st.slider("Applied dead-weight (kg)", 0, 1000, 250, 10)
+    cal = 9.81 * mass
+    fig, ax = plt.subplots(figsize=(11, 3.5))
+    ms = np.linspace(0, 1000, 100)
+    cs = 9.81 * ms
+    ax.plot(ms, cs, color=PURPLE, lw=2)
+    ax.scatter([mass], [cal], color=RED, s=80, zorder=5,
+               label=f"{mass} kg -> {cal:.0f} N")
+    ax.set_xlabel("mass (kg)"); ax.set_ylabel("force (N)")
+    ax.legend(frameon=False)
+    show(fig)
+def _sim_lora_budget():
+    section_h("LoRa link budget - can we close the link?")
+    distance = st.slider("Distance (km)", 0.5, 10.0, 3.0, 0.1)
+    tx_dbm = st.slider("TX power (dBm)", 2, 20, 14)
+    rx_gain = st.slider("Gateway antenna gain (dBi)", 2, 12, 6)
+    fspl = 32.4 + 20 * np.log10(distance) + 20 * np.log10(868)
+    fig, ax = plt.subplots(figsize=(11, 3.0))
+    bars = ["TX", "TX ant", "FSPL loss", "RX ant", "RX (dBm)"]
+    vals = [tx_dbm, 2, -fspl, rx_gain, 0]
+    cum = [0]
+    for v in vals[:-1]:
+        cum.append(cum[-1] + v)
+    cols = [BLUE, GREEN, RED, GREEN, BLUE]
+    for i, (b, v, c) in enumerate(zip(bars, vals, cols)):
+        if i < 4:
+            ax.bar(i, v, bottom=cum[i], color=c, edgecolor=TEXT, lw=0.6)
+        else:
+            ax.bar(i, cum[i], color=c, edgecolor=TEXT, lw=0.6)
+    ax.axhline(-120, color=RED, ls="--", lw=1, label="LoRa sensitivity SF7/BW125")
+    ax.set_xticks(range(len(bars))); ax.set_xticklabels(bars)
+    ax.set_ylabel("dBm"); ax.legend(frameon=False)
+    show(fig)
+
+
+def _sim_solar_harvest():
+    section_h("Solar harvest - Wh per day by month")
+    tilt = st.slider("Panel tilt (deg)", 0, 60, 25)
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    peak_sun = 4.5 + 1.5 * np.cos(np.linspace(0, 2 * np.pi, 12))
+    factor = np.cos(np.radians(tilt - 25))
+    wh = 20 * peak_sun * factor
+    fig, ax = plt.subplots(figsize=(11, 3.5))
+    ax.bar(months, wh, color=AMBER, edgecolor=TEXT, lw=0.6)
+    ax.axhline(40, color=GREEN, ls="--", lw=1, label="daily need (40 Wh)")
+    ax.set_ylabel("Wh / day"); ax.legend(frameon=False)
+    show(fig)
+
+
+def _sim_power_budget():
+    section_h("Power budget - daily energy in vs out")
+    load = st.slider("Always-on load (mA @ 3.3 V)", 40, 200, 80)
+    tx_per_day = st.slider("TX bursts per day", 1, 500, 60)
+    in_wh = 45
+    base = load * 3.3 * 24 / 1000
+    tx = tx_per_day * 1.5
+    out_wh = base + tx
+    fig, ax = plt.subplots(figsize=(11, 3.0))
+    ax.bar(["Harvest", "ESP32 base", "TX bursts", "Net"],
+           [in_wh, base, tx, in_wh - out_wh],
+           color=[GREEN, BLUE, ORANGE,
+                  GREEN if in_wh > out_wh else RED],
+           edgecolor=TEXT, lw=0.6)
+    ax.axhline(0, color=TEXT, lw=0.8)
+    ax.set_ylabel("Wh / day")
+    show(fig)
+
+
+def render_power():
+    page_title("Power",
+               "Solar pod, MPPT, battery, buck converters and energy budget.")
+    section_h("Power tree")
+    diagram_power()
+    section_h("Energy budget")
+    cols = st.columns(4)
+    cards = [
+        ("Harvest (Dec)",       "32 Wh/day"),
+        ("Always-on load",      "6.3 Wh/day"),
+        ("TX bursts (60/d)",    "1.5 Wh/day"),
+        ("Net",                 "+ 24 Wh/day surplus"),
     ]
-    df = pd.DataFrame(bom, columns=["Component", "Function", "Qty", "INR"])
-    df["Total"] = df["INR"] * df["Qty"]
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    total = df["Total"].sum()
-    st.metric("Total per belt pod", f"INR {total:,}", f"~ USD {total/83:.0f}")
+    for c, (lbl, val) in zip(cols, cards):
+        c.markdown(
+            f'<div class="kpi"><div class="kpi-lbl">{lbl}</div>'
+            f'<div class="kpi-val">{val}</div></div>',
+            unsafe_allow_html=True,
+        )
+    section_h("Battery")
+    st.markdown(
+        "12 V / 20 Ah LiFePO4 -> **240 Wh**. Worst-case dark-day autonomy "
+        "= (240 - daily load) / daily load approx **41 days** without sun."
+    )
+
+
+def render_lora():
+    page_title("LoRa Link",
+               "868 MHz LoRa from pod to gateway, GSM as fallback.")
+    section_h("Topology")
+    diagram_lora()
+    section_h("Link budget - interactive")
+    _sim_lora_budget()
+
+
+def render_enclosure():
+    page_title("Enclosure",
+               "IP67 belt-mounted pod, glands, vibration isolation.")
+    section_h("Cross-section")
+    diagram_enclosure()
+    section_h("Survival kit")
+    bullets = [
+        "IP67 die-cast aluminium body, polycarbonate clear lid, 4x M4 captive screws",
+        "Silicone gasket - re-coat yearly",
+        "Two PG glands: one for 12 V solar feed, one for the sensor loom",
+        "Goretek IP67 vent for pressure equalisation (no condensation)",
+        "Carrier PCB on silicone vibration isolators - no direct metal path",
+        "Stainless L-bracket clamped to belt frame (not welded - belt moves)",
+        "Conformal coating (HumiSeal 1B73) on PCB after assembly",
+    ]
+    for b in bullets:
+        st.markdown(f"- {b}")
+def render_bom():
+    page_title("BOM", "Bill of materials with INR + USD totals.")
+    rows = [
+        ("ESP32-WROOM-32 dev board",      1,  450),
+        ("LoRa RA-02 (SX1278) 868 MHz",   1,  650),
+        ("SIM800L GSM module",            1,  450),
+        ("ADXL345 vibration",             1,  180),
+        ("DS18B20 + 4.7 kohm",            1,   95),
+        ("HX711 + 1 t S-type load cell",  1,  650),
+        ("E18-D80NK IR tear (pair)",      2,  280),
+        ("A3144 Hall + magnet",           1,   40),
+        ("ACS712-30A current",            1,  220),
+        ("GP2Y1010AU0F dust",             1,  950),
+        ("MQ-2 gas",                      1,  180),
+        ("MQ-135 air quality",            1,  200),
+        ("IP67 enclosure 150x100x70",     1,  620),
+        ("20 W mono solar panel",         1, 1900),
+        ("MPPT CN3791 + DW01 BMS",        1,  380),
+        ("12 V 20 Ah LiFePO4 (32700x4)",  1, 4200),
+        ("LM2596 buck + AMS1117 LDO",     1,  120),
+        ("PG7 / PG9 cable glands",        2,   60),
+        ("Misc (wires, fuses, TVS, R, C)", 1,  300),
+    ]
+    total = sum(q * p for _, q, p in rows)
+    usd = total / 83
+    st.markdown(
+        "| Item | Qty | Unit (INR) | Line (INR) |\n"
+        "|---|---:|---:|---:|\n"
+        + "\n".join(
+            f"| {n} | {q} | {p} | {q*p} |"
+            for n, q, p in rows
+        )
+        + f"\n| **Total** | | | **{total} INR  approx  ${usd:.0f} USD** |"
+    )
 
 
 def render_install():
-    st.markdown("## Installation walkthrough")
+    page_title("Install",
+               "Step-by-step install walkthrough for one belt.")
     steps = [
-        ("Mount the bracket",
-         "Weld the M10 U-bolt bracket to the take-up frame, 30 cm from the head pulley."),
-        ("Bolt the pod",
-         "Bolt the IP67 box to the bracket. Torque to 35 Nm."),
-        ("Wire sensors",
-         "Land the DS18B20, ADXL345, strain-gauge, Hall, E18-IR, ACS712, MQ-2, MQ-135, GP2Y wires on the carrier PCB."),
-        ("Solar pod",
-         "Mount the solar panel on the belt-stringer pole, true south, 30 deg tilt. Run 12 V cable <= 30 m."),
-        ("Power on",
-         "Press the BOOT button — OLED shows firmware version, then READY."),
-        ("Pair with gateway",
-         "Hold PAIR on the cabin gateway for 5 s; LED blinks green when the pod joins."),
-        ("Commissioning",
-         "Run belt empty for 5 min; verify vibration FFT shows clean 1x RPM peak; tension baseline stored."),
-        ("Lock and tag",
-         "Close the box, torque the lid screws to 4 Nm, attach tamper seal."),
+        ("Survey the belt",
+         "Walk the belt, note head-pulley height, take-up carriage travel, "
+         "where the maintenance cabin sits. Confirm LoS for LoRa (or plan "
+         "for a Yagi + repeater)."),
+        ("Mount the solar pod",
+         "On the tunnel roof or a pole 5-10 m from the belt, south in the "
+         "northern hemisphere, clear of dust plumes. Aim the panel."),
+        ("Mount the belt pod",
+         "Stainless L-bracket clamped to the belt frame at the head-pulley "
+         "side, clear of the take-up carriage. Leave 0.5 m of slack cable."),
+        ("Wire it up",
+         "12 V from solar pod to pod. Sensor loom up: DS18B20 probe pressed "
+         "against the belt carcass, ADXL345 epoxied to bearing housing, "
+         "load cell on the take-up carriage, IR pair across the belt."),
+        ("Power up & pair",
+         "Power on. ESP32 boots, joins LoRa, gateway hears it. SMS test "
+         "to the maintenance phone."),
+        ("Calibrate & hand over",
+         "Dead-weight the load cell, set the take-up PID, set OK/WARN/ALARM "
+         "thresholds, train the cabin operator on the dashboard."),
     ]
     for i, (title, body) in enumerate(steps, start=1):
         with st.expander(f"{i}. {title}"):
             st.markdown(body)
-
-
-# =====================================================================
-# TOP TAB BAR  (replaces sidebar — never lose navigation)
-# =====================================================================
-st.markdown('<p class="big-title">BeltGuard</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">A solar-powered sensor pod that watches '
-            'every metre of every belt, 24x7.</p>', unsafe_allow_html=True)
-
-tab_names = [
-    "Overview",
-    "Architecture",
-    "Sensor Pod",
-    "Live Telemetry",
-    "Simulations",
-    "Power",
-    "LoRa Link",
-    "BOM",
-    "Install",
-]
-tab_overview, tab_arch, tab_pod, tab_tel, tab_sim, tab_pwr, tab_lora, tab_bom, tab_inst = (
-    st.tabs(tab_names)
-)
-
-with tab_overview:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.markdown('<div class="metric-card"><b>Belt fires</b><br>'
-                '<span class="crit">detected in <90 s</span></div>',
-                unsafe_allow_html=True)
-    c2.markdown('<div class="metric-card"><b>Belt tears</b><br>'
-                '<span class="crit">detected in <2 s</span></div>',
-                unsafe_allow_html=True)
-    c3.markdown('<div class="metric-card"><b>LoRa range</b><br>'
-                '<span class="ok">2-5 km LoS</span></div>',
-                unsafe_allow_html=True)
-    c4.markdown('<div class="metric-card"><b>Solar autonomy</b><br>'
-                '<span class="ok">41 days</span></div>',
-                unsafe_allow_html=True)
-    st.markdown("---")
-    render_architecture()
-
-with tab_arch:
-    render_architecture()
-
-with tab_pod:
-    render_sensor_pod()
-
-with tab_tel:
-    render_live_telemetry()
-
-with tab_sim:
-    render_simulations()
-
-with tab_pwr:
-    render_power()
-
-with tab_lora:
-    render_lora()
-
-with tab_bom:
-    render_bom()
-
-with tab_inst:
-    render_install()
-
-# Footer with a "how to open sidebar" hint (sidebar starts collapsed)
-st.markdown("---")
+# SIDEBAR - sub-navigation (sensor deep-dives).
+# The TOP TAB BAR below is ALSO a complete navigation path, so collapsing
+# this sidebar can never lock the user out.
 with st.sidebar:
-    st.markdown("# BeltGuard")
-    st.caption("Sidebar contents:")
     st.markdown(
-        "Same tabs are above in the top bar. Use this sidebar for "
-        "debug info, settings, or quick reset."
+        f'<p style="font-size:1.3rem;font-weight:800;color:{BLUE};'
+        f'margin:0">BeltGuard</p>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Mine conveyor belt safety monitor")
+
+    sub = st.radio(
+        "Sensor deep-dives",
+        ["(none)"] + [s["name"] for s in SENSOR_DEFS],
+        label_visibility="collapsed",
     )
     st.markdown("---")
     if st.button("Reset session"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
-    st.caption("v1.0 / 2026")
+    st.caption("v2.0 / 2026 - light theme")
+
+# If the sidebar selected a sensor, render that sensor's deep-dive and stop.
+# Otherwise fall through to the top tab bar.
+if sub != "(none)":
+    for s in SENSOR_DEFS:
+        if s["name"] == sub:
+            render_sensor_page(s)
+            st.stop()
+
+
+# TOP TAB BAR - always visible, even when sidebar is collapsed
+st.markdown(
+    '<p class="big-title">BeltGuard</p>'
+    '<p class="sub-title">A solar-powered sensor pod that watches every '
+    'metre of every belt, 24 x 7.</p>',
+    unsafe_allow_html=True,
+)
+
+tab_names = [
+    "Overview", "Architecture", "Sensor Pod", "Live Telemetry",
+    "Simulations", "Power", "LoRa Link", "Enclosure", "BOM", "Install",
+]
+(*tabs,) = st.tabs(tab_names)
+
+with tabs[0]:
+    render_overview()
+with tabs[1]:
+    render_architecture()
+with tabs[2]:
+    render_sensor_pod()
+with tabs[3]:
+    render_live_telemetry()
+with tabs[4]:
+    render_simulations()
+with tabs[5]:
+    render_power()
+with tabs[6]:
+    render_lora()
+with tabs[7]:
+    render_enclosure()
+with tabs[8]:
+    render_bom()
+with tabs[9]:
+    render_install()
