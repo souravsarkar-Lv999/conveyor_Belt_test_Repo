@@ -1,4 +1,4 @@
-# How to Read This Repo — A "Baby Terms" Guide
+# How to Read This Repo — A "Easy" Guide
 
 If you are opening this repo and going *"what is all this?"* — read this
 file first. It explains what each file is for, in plain English, and
