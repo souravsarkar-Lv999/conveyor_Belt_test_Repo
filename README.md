@@ -5,21 +5,19 @@ conditions that lead to conveyor **belt blasts and fires** in coal/iron
 mines — *replacing the "one human watches the belt with eyes" model
 that has failed too many times.*
 
----
-
-## 👉 New here? Start with [`HOW_TO_READ_THIS.md`](HOW_TO_READ_THIS.md)
-
-It tells you which file to open, in plain English.
+> **🎬 Demo:** run the interactive Streamlit website locally —
+> double-click `run_website.bat` (Windows) or `bash run_website.sh`
+> (Linux/macOS). Opens at <http://localhost:8501>.
 
 ---
 
-## Why
+## The problem
 
-In mines, coal and iron are carried on conveyor belts. Today the only
-health check is a human inspector watching the belt. Belt fires,
-longitudinal tears, and idler seizures happen between inspections, and
-when they happen the belt "blasts" — coal-dust fire / belt rupture —
-endangering the mine and its people.
+In coal and iron mines, conveyor belts carry thousands of tonnes per hour.
+Today the only health check is a human inspector walking past the belt every
+shift. Between inspections, **belt fires and belt tears can start, and a
+"belt blast" — coal-dust fire + belt rupture — can kill people and shut
+the mine for months.**
 
 This project puts a **sealed sensor pod on the belt** that continuously
 monitors vibration, temperature, smoke, gas, dust, tension, speed,
@@ -29,17 +27,41 @@ emergency fallback**.
 
 ---
 
+## Quick start — run the website
+
+```bash
+# 1) install deps (one-time)
+pip install -r requirements.txt
+
+# 2) launch the website
+streamlit run streamlit_app.py
+# OR just double-click run_website.bat
+```
+
+Then open <http://localhost:8501> in your browser. The site has
+**9 interactive sections** (left sidebar):
+
+1. **🏠 Overview** — hero metrics, system block diagram
+2. **🏗 Architecture** — full animated schematic with annotated sensors
+3. **🎛 Sensor Pod (3D)** — download the .glb 3D model, internal layout, sensor map
+4. **📡 Live Telemetry** — simulated dashboard with "inject fire" button
+5. **🔬 Simulations** — interactive plots with sliders (same maths as the PNGs)
+6. **☀ Power System** — solar sizing, energy budget table
+7. **📶 LoRa Link** — radio budget, antenna notes
+8. **💰 BOM & Cost** — searchable bill of materials, total in ₹ / USD
+9. **🛠 Installation** — 8-step install walkthrough
+
+---
+
 ## Hardware (this repo)
 
 This repository contains the **complete hardware design** as Markdown
-documentation + diagrams + Python simulations. The firmware team
-handles the ESP32 code in a sibling repo.
+documentation + diagrams + Python simulations + Streamlit website.
 
-### Index of docs
+### Docs
 
 | File | What it covers |
 |---|---|
-| [`HOW_TO_READ_THIS.md`](HOW_TO_READ_THIS.md) | **Plain-English navigation guide — read this first** |
 | [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) | System overview, block diagram, philosophy, spec snapshot, failure modes |
 | [`SENSOR_DESIGN.md`](SENSOR_DESIGN.md) | Every sensor: ESP32, ADXL345, HX711 + strain gauge, DS18B20, NTC, Hall, E18 IR, ACS712, GP2Y, MQ-2/-135, OLED, buzzer — with rationale, wiring, mounting |
 | [`POWER_SYSTEM.md`](POWER_SYSTEM.md) | Solar sizing, MPPT charge controller, LiFePO4 battery, LM2596 / AMS1117 rails |
@@ -56,7 +78,10 @@ handles the ESP32 code in a sibling repo.
 | `assets/` | Photos of conveyor belts + a **3D `.glb` model** of a quarry conveyor (open in Blender / Windows 3D Viewer) |
 | `simulations/` | **Python scripts** that mathematically model the whole hardware system, generating PNG plots in `simulations/output/` |
 | `simulations/run_all.py` | One command runs every simulation |
-| `simulations/ltspice/` | A ready-to-run LTspice schematic for the LM2596 buck converter |
+| `simulations/ltspice/` | Two LTspice schematics — `solar_charger.asc` (needs LM2596 model) and **`LM2596_substitute.asc`** (works out of the box) |
+| `streamlit_app.py` | The interactive website |
+| `requirements.txt` | Python deps for the website |
+| `run_website.bat` / `.sh` | One-click launcher |
 
 ---
 
@@ -85,10 +110,11 @@ Any **two** sensors confirming a fault within 30 s → **cabin siren + SMS
 
 ## Bill of materials (summary)
 
-- **Surface / open-pit version:** ~₹30 000 / ~USD 370 per belt.
+- **Surface / open-pit version:** ~₹17 000 / ~USD 200 per belt.
 - **Underground coal-mine Ex-d version:** ~₹98 000 (extra for
   certification, flameproof box, intrinsic-safety barriers).
-- See [`BOM.md`](BOM.md) for the line-by-line.
+- See [`BOM.md`](BOM.md) and the **BOM section** in the Streamlit
+  website for the line-by-line.
 
 ---
 
@@ -111,7 +137,10 @@ Any **two** sensors confirming a fault within 30 s → **cabin siren + SMS
 ```
 conveyor_Belt_test_Repo/
 ├── README.md              ← you are here
-├── HOW_TO_READ_THIS.md    ← plain-English guide, read first
+├── streamlit_app.py       ← ⭐ the website — run this!
+├── requirements.txt       ← pip install -r requirements.txt
+├── run_website.bat        ← Windows one-click launcher
+├── run_website.sh         ← Linux/macOS launcher
 │
 ├── HARDWARE_DESIGN.md
 ├── SENSOR_DESIGN.md
@@ -122,41 +151,32 @@ conveyor_Belt_test_Repo/
 ├── BOM.md
 ├── INSTALLATION.md
 │
-├── assets/                ← belt photos + 3D model
-│   ├── *.webp             ← reference photos of conveyor belts
-│   └── quarry_conveyor_system_kit.glb  ← 3D belt model (open in Blender)
+├── assets/                ← belt photos + 3D .glb model
 │
 └── simulations/           ← Python + LTspice
     ├── README.md
-    ├── run_all.py         ← runs every Python sim, prints PASS/FAIL
-    ├── power_budget.py    → power_budget.png
-    ├── solar_harvest.py   → solar_harvest.png
-    ├── lora_link_budget.py→ lora_link_budget.png
-    ├── vibration_fft.py   → vibration_fft.png
-    ├── belt_thermal.py    → belt_thermal.png
-    ├── strain_calibration.py → strain_calibration.png
-    ├── _organize.py       ← moves images into assets/ (run once)
+    ├── run_all.py
+    ├── power_budget.py
+    ├── solar_harvest.py
+    ├── lora_link_budget.py
+    ├── vibration_fft.py
+    ├── belt_thermal.py
+    ├── strain_calibration.py
+    ├── output/            ← generated PNG plots (committed)
     └── ltspice/
-        ├── solar_charger.asc  ← LM2596 buck, open in LTspice
+        ├── solar_charger.asc     ← original (needs LM2596 model)
+        ├── LM2596_substitute.asc ← ⭐ works out of the box
         └── README.md
 ```
-
-The firmware team should:
-
-1. Read [`HOW_TO_READ_THIS.md`](HOW_TO_READ_THIS.md) first.
-2. Then read [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) end to end.
-3. Then drill into [`WIRING_DIAGRAM.md`](WIRING_DIAGRAM.md) for the
-   exact pin assignments.
-4. Then [`COMMUNICATION.md`](COMMUNICATION.md) for the LoRa air
-   protocol.
 
 ---
 
 ## Status
 
 - ✅ Hardware design complete
+- ✅ Interactive **Streamlit website** with 9 sections
 - ✅ Python simulations (6 plots) — see `simulations/output/`
-- ✅ LTspice schematic for the LM2596 buck
+- ✅ LTspice schematic for the LM2596 buck (substitute + original)
 - ✅ 3D belt model in `assets/`
 - ⏳ Firmware (separate repo): in progress
 - ⏳ First install: planned
