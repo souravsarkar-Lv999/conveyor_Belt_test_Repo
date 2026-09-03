@@ -1,0 +1,42 @@
+# --- Python build / cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- OS junk ---
+*.tmp
+*.bak
+*.log
+
+# --- Personal / local-only files (NOT for the team) ---
+# This file is for ME (Sourav) only — quick-reference cheatsheet.
+# It's local-only and will never be committed or pushed.
+LOCAL_NOTES_FOR_ME.md
+
+# Personal helper scripts
+check_state.py
+_scratch/
+my_notes/
+
+# --- LTspice output (do not commit .raw, .log files) ---
+*.raw
+*.log
+
+# --- Optional: keep generated PNG plots OUT of version control ---
+# Uncomment if you want to regenerate plots locally instead of
+# committing them. (Currently they ARE committed, see git history.)
+# simulations/output/*.png
