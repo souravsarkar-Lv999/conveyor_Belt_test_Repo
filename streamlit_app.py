@@ -28,14 +28,24 @@ st.set_page_config(
     page_icon="⛏",
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={},   # empty dict hides the Streamlit hamburger menu
 )
 ROOT = Path(__file__).resolve().parent
 
 # =====================================================================
-# CSS
+# CSS — hides Streamlit footer + chrome decoration
 # =====================================================================
 st.markdown("""
 <style>
+    /* hide the "Made with Streamlit" footer */
+    footer { visibility: hidden; }
+    /* hide the top-right hamburger menu (defence-in-depth) */
+    #MainMenu { visibility: hidden; }
+    /* hide the toolbar that sometimes appears */
+    [data-testid="stToolbar"] { visibility: hidden; }
+    /* hide the small status / connection indicators */
+    [data-testid="stStatusWidget"] { visibility: hidden; }
+
     .big-title   { font-size:3.0rem; font-weight:800; line-height:1.1;
                    background: linear-gradient(90deg,#ff8800,#ff3300);
                    -webkit-background-clip:text; color:transparent; }
@@ -50,6 +60,41 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] button { font-size:1.05rem; font-weight:600; }
 </style>
 """, unsafe_allow_html=True)
+
+
+# =====================================================================
+# SIDEBAR — section selector (must come before any code that uses `section`)
+# =====================================================================
+SECTIONS = [
+    ("🏠  Overview",          "overview"),
+    ("🏗  Architecture",      "architecture"),
+    ("🎛  Sensor Pod (3D)",   "sensor_pod"),
+    ("📡  Live Telemetry",    "telemetry"),
+    ("🔬  Simulations",       "simulations"),
+    ("☀  Power System",      "power"),
+    ("📶  LoRa Link",         "lora"),
+    ("💰  BOM & Cost",        "bom"),
+    ("🛠  Installation",      "install"),
+]
+DEFAULT_KEY = "overview"
+if "section_key" not in st.session_state:
+    st.session_state.section_key = DEFAULT_KEY
+
+with st.sidebar:
+    st.markdown("# ⛏ BeltGuard")
+    st.caption("Mine conveyor belt safety monitor")
+    st.markdown("---")
+    label = st.radio(
+        "Navigate",
+        [s[0] for s in SECTIONS],
+        index=[s[1] for s in SECTIONS].index(st.session_state.section_key),
+        label_visibility="collapsed",
+    )
+    st.session_state.section_key = dict(SECTIONS)[label]
+    st.markdown("---")
+    st.caption("Built for hackathon demo · v1.0 · 2026")
+
+section = st.session_state.section_key
 
 
 # =====================================================================
@@ -515,19 +560,34 @@ def render_power():
 # 6. LoRa LINK
 # =====================================================================
 def render_lora():
-    st.markdown("## 📶 LoRa Link")
+    st.markdown("## 📶 LoRa Radio Link — hardware")
+    st.caption("868 MHz ISM band, no SIM required, works through rock.")
     st.markdown("""
-    - **Modem**: Semtech SX1278 (RA-02 module)
-    - **Band**: 868 MHz (India / EU)
+    - **Modem**: Semtech SX1278 (RA-02 module) on SPI
+    - **Band**: 868 MHz (India / EU sub-GHz ISM, no licence needed)
     - **Spreading factor**: SF12, BW 125 kHz, CR 4/5 → sensitivity **-137 dBm**
-    - **TX power**: +14 dBm
-    - **Antenna**: 3 dBi omni fiberglass, vertical
+    - **TX power**: +14 dBm (about 25 mW)
+    - **Antenna**: 3 dBi omni fiberglass, vertical, 2 m above ground
     - **Range**: 2–5 km line-of-sight, ~500 m through 1 rock wall
     - **Fallback**: SIM800L GSM module (SMS only, 1 message / hour)
+    - **Encryption**: AES-128 (LoRaWAN AppKey + NwkSKey)
     """)
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/LoRa_logo.svg/512px-LoRa_logo.svg.png",
-             caption="LoRaWAN is the open standard we use on top of SX1278.",
-             width=200)
+    # Hardware block diagram of the radio chain
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.set_xlim(0, 12); ax.set_ylim(0, 4); ax.axis("off")
+    ax.set_facecolor("#0d1117"); fig.patch.set_facecolor("#0d1117")
+    draw_block(0.2, 1.4, 1.8, 1.0, "ESP32\nSPI bus", color="#0077ff", ax=ax, fontsize=10)
+    draw_arrow(2.0, 1.9, 2.4, 1.9)
+    draw_block(2.4, 1.4, 1.8, 1.0, "SX1278\nRA-02", color="#0088ff", ax=ax, fontsize=10)
+    draw_arrow(4.2, 1.9, 4.6, 1.9)
+    draw_block(4.6, 1.4, 1.8, 1.0, "SMA\nfeedthrough", color="#444", ax=ax, fontsize=10)
+    draw_arrow(6.4, 1.9, 6.8, 1.9)
+    draw_block(6.8, 1.4, 2.4, 1.0, "3 dBi\nfiber-glass ant", color="#ff8800", ax=ax, fontsize=10)
+    ax.annotate("868 MHz\n2-5 km LoS", xy=(9.5, 1.9), xytext=(9.5, 3.3),
+                color="white", ha="center", fontsize=10, fontweight="bold",
+                arrowprops=dict(arrowstyle="->", color="white"))
+    draw_block(9.5, 0.4, 2.2, 0.8, "Gateway\nRA-02 + ESP32", color="#00cc66", ax=ax, fontsize=9)
+    st.pyplot(fig); plt.close(fig)
 
 
 # =====================================================================
@@ -589,8 +649,7 @@ def render_install():
 # =====================================================================
 # ROUTING
 # =====================================================================
-if section.startswith("🏠"):
-    # Hero
+if section == "overview":
     st.markdown('<p class="big-title">BeltGuard</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-title">A solar-powered sensor pod that watches every metre of every belt, 24×7.</p>',
                 unsafe_allow_html=True)
@@ -603,19 +662,23 @@ if section.startswith("🏠"):
     st.markdown("---")
     render_architecture()
 
-elif section.startswith("🏗"):
+elif section == "architecture":
     render_architecture()
-elif section.startswith("🎛"):
+elif section == "sensor_pod":
     render_sensor_pod()
-elif section.startswith("📡"):
+elif section == "telemetry":
     render_live_telemetry()
-elif section.startswith("🔬"):
+elif section == "simulations":
     render_simulations()
-elif section.startswith("☀"):
+elif section == "power":
     render_power()
-elif section.startswith("📶"):
+elif section == "lora":
     render_lora()
-elif section.startswith("💰"):
+elif section == "bom":
     render_bom()
-elif section.startswith("🛠"):
+elif section == "install":
     render_install()
+else:
+    # Fallback in case session_state got corrupted
+    st.session_state.section_key = DEFAULT_KEY
+    st.rerun()
